@@ -54,7 +54,7 @@ TEST(HttpServerIntegration, ServesHealthEndpointOverTcp) {
 
     std::promise<void> stopped;
     const auto stopped_future = stopped.get_future();
-    net::post(server_io, [server, &stopped] {
+    net::post(server->executor(), [server, &stopped] {
         server->stop();
         stopped.set_value();
     });

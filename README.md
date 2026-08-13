@@ -4,7 +4,7 @@ EventEdge is a high-performance C++20 reverse proxy, load balancer, and cache de
 
 ## Status
 
-EventEdge now has a C++20 foundation, a single-threaded asynchronous Boost.Asio/Beast HTTP/1.1 server, a local `GET /health` endpoint, and asynchronous reverse proxying to one configured HTTP upstream. Unavailable upstreams receive a basic `502 Bad Gateway` response.
+EventEdge uses asynchronous Boost.Asio/Beast networking with one `io_context` run by a configurable multithreaded runtime. Per-session strand serialization protects a local `GET /health` endpoint and asynchronous reverse proxying to one configured HTTP upstream. Unavailable upstreams receive a basic `502 Bad Gateway` response.
 
 Multiple upstream backends, load balancing, active upstream health checks, retries, configurable timeout policy, caching, request coalescing, metrics, and measured performance claims are not implemented yet.
 
@@ -23,14 +23,14 @@ ctest --preset debug --output-on-failure
 ./build/debug/eventedge
 ```
 
-The server defaults to listening on `127.0.0.1:8080` and proxying to `127.0.0.1:9000`. Address, port, upstream host, and upstream port can be supplied explicitly:
+The server defaults to listening on `127.0.0.1:8080` and proxying to `127.0.0.1:9000`. Its default worker count is `std::thread::hardware_concurrency()` with a minimum of one. Address, port, upstream host, upstream port, and an optional worker count can be supplied explicitly:
 
 ```sh
-./build/debug/eventedge 127.0.0.1 8080 127.0.0.1 9000
+./build/debug/eventedge 127.0.0.1 8080 127.0.0.1 9000 4
 curl -i http://127.0.0.1:8080/health
 ```
 
-Each proxied request opens a new upstream HTTP connection. Connection pooling and streaming request/response bodies are intentionally deferred.
+Each proxied request opens a new upstream HTTP connection. Connection pooling and streaming request/response bodies are intentionally deferred. The worker runtime has not been benchmarked; no performance improvement is claimed.
 
 For an optimized build:
 

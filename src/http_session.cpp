@@ -1,6 +1,7 @@
 #include <eventedge/http_session.hpp>
 #include <eventedge/upstream_proxy.hpp>
 
+#include <boost/asio/bind_executor.hpp>
 #include <boost/beast/http.hpp>
 
 #include <chrono>
@@ -23,10 +24,11 @@ void HttpSession::do_read() {
     stream_.expires_after(std::chrono::seconds(30));
 
     http::async_read(stream_, buffer_, request_,
-                     [self = shared_from_this()](beast::error_code error,
-                                                 std::size_t bytes_transferred) {
+                     net::bind_executor(stream_.get_executor(), [self = shared_from_this()](
+                                                                    beast::error_code error,
+                                                                    std::size_t bytes_transferred) {
                          self->on_read(error, bytes_transferred);
-                     });
+                     }));
 }
 
 void HttpSession::on_read(beast::error_code error, std::size_t) {
@@ -56,10 +58,10 @@ void HttpSession::write_response(HttpResponse response) {
     const bool close_after_write = response_to_write->need_eof();
 
     http::async_write(stream_, *response_to_write,
-                      [self = shared_from_this(), response_to_write, close_after_write](
+                      net::bind_executor(stream_.get_executor(), [self = shared_from_this(), response_to_write, close_after_write](
                           beast::error_code write_error, std::size_t bytes_transferred) {
                           self->on_write(close_after_write, write_error, bytes_transferred);
-                      });
+                      }));
 }
 
 void HttpSession::on_write(bool close_after_write, beast::error_code error, std::size_t) {

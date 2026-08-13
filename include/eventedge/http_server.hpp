@@ -3,6 +3,7 @@
 #include <eventedge/upstream_config.hpp>
 
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/strand.hpp>
 
 #include <cstdint>
 #include <memory>
@@ -19,12 +20,14 @@ public:
     void run();
     void stop();
 
+    [[nodiscard]] net::any_io_executor executor() const;
     [[nodiscard]] std::uint16_t port() const;
 
 private:
     void do_accept();
 
     tcp::acceptor acceptor_;
+    net::strand<net::io_context::executor_type> acceptor_strand_;
     UpstreamConfig upstream_;
 };
 
