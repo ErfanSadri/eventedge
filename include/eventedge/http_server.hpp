@@ -15,7 +15,9 @@ using tcp = net::ip::tcp;
 
 class HttpServer : public std::enable_shared_from_this<HttpServer> {
 public:
-    HttpServer(net::io_context& io_context, tcp::endpoint endpoint, UpstreamConfig upstream);
+    HttpServer(net::io_context& io_context,
+               tcp::endpoint endpoint,
+               std::shared_ptr<UpstreamPool> upstream_pool);
 
     void run();
     void stop();
@@ -28,7 +30,7 @@ private:
 
     tcp::acceptor acceptor_;
     net::strand<net::io_context::executor_type> acceptor_strand_;
-    UpstreamConfig upstream_;
+    std::shared_ptr<UpstreamPool> upstream_pool_;
 };
 
 }  // namespace eventedge

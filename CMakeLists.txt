@@ -42,6 +42,7 @@ if(BUILD_TESTING)
     add_executable(eventedge_tests
         tests/http_handler_test.cpp
         tests/http_server_integration_test.cpp
+        tests/upstream_pool_test.cpp
         tests/reverse_proxy_integration_test.cpp
     )
     target_link_libraries(eventedge_tests PRIVATE eventedge_core GTest::gtest_main)

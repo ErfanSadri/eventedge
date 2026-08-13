@@ -12,8 +12,8 @@ namespace eventedge {
 namespace net = boost::asio;
 using tcp = net::ip::tcp;
 
-HttpSession::HttpSession(tcp::socket&& socket, UpstreamConfig upstream)
-    : stream_(std::move(socket)), upstream_(std::move(upstream)) {}
+HttpSession::HttpSession(tcp::socket&& socket, std::shared_ptr<UpstreamPool> upstream_pool)
+    : stream_(std::move(socket)), upstream_pool_(std::move(upstream_pool)) {}
 
 void HttpSession::run() {
     do_read();
@@ -48,7 +48,7 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
     }
 
     std::make_shared<UpstreamProxy>(
-        stream_.get_executor(), upstream_, std::move(request_),
+        stream_.get_executor(), upstream_pool_->select(), std::move(request_),
         [self = shared_from_this()](HttpResponse response) { self->write_response(std::move(response)); })
         ->run();
 }

@@ -50,17 +50,17 @@ void remove_hop_by_hop_headers(http::fields& headers) {
     headers.erase(http::field::upgrade);
 }
 
-std::string upstream_host_header(const UpstreamConfig& upstream) {
+std::string upstream_host_header(const UpstreamEndpoint& upstream) {
     if (upstream.host.find(':') != std::string::npos) {
-        return '[' + upstream.host + "]:" + upstream.port;
+        return '[' + upstream.host + "]:" + std::to_string(upstream.port);
     }
-    return upstream.host + ':' + upstream.port;
+    return upstream.host + ':' + std::to_string(upstream.port);
 }
 
 }  // namespace
 
 UpstreamProxy::UpstreamProxy(boost::asio::any_io_executor executor,
-                             UpstreamConfig upstream,
+                             UpstreamEndpoint upstream,
                              HttpRequest request,
                              CompletionHandler completion_handler)
     : resolver_(executor),
@@ -80,7 +80,7 @@ void UpstreamProxy::run() {
     request_.set(http::field::connection, "close");
     request_.prepare_payload();
 
-    resolver_.async_resolve(upstream_.host, upstream_.port,
+    resolver_.async_resolve(upstream_.host, std::to_string(upstream_.port),
                             boost::asio::bind_executor(executor_, [self = shared_from_this()](boost::beast::error_code error,
                                                         boost::asio::ip::tcp::resolver::results_type results) {
                                 self->on_resolve(error, std::move(results));
