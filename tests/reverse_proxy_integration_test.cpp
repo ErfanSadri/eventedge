@@ -1,5 +1,6 @@
 #include <eventedge/http_server.hpp>
 #include <eventedge/http_handler.hpp>
+#include <eventedge/upstream_health_monitor.hpp>
 
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -22,8 +23,10 @@ namespace beast = boost::beast;
 
 class TestUpstream {
 public:
-    explicit TestUpstream(std::size_t expected_requests, std::string identity = "upstream")
-        : acceptor_(io_context_, tcp::endpoint{net::ip::address_v4::loopback(), 0}),
+    explicit TestUpstream(std::size_t expected_requests,
+                          std::string identity = "upstream",
+                          std::uint16_t port = 0)
+        : acceptor_(io_context_, tcp::endpoint{net::ip::address_v4::loopback(), port}),
           expected_requests_(expected_requests),
           identity_(std::move(identity)),
           thread_([this] { serve_requests(); }) {}
@@ -39,13 +42,18 @@ public:
 
 private:
     void serve_requests() {
-        for (std::size_t request_number = 0; request_number < expected_requests_; ++request_number) {
+        std::size_t requests_served = 0;
+        while (requests_served < expected_requests_) {
             tcp::socket socket{io_context_};
             acceptor_.accept(socket);
 
             beast::flat_buffer buffer;
             HttpRequest request;
-            http::read(socket, buffer, request);
+            beast::error_code read_error;
+            http::read(socket, buffer, request, read_error);
+            if (read_error) {
+                continue;
+            }
             {
                 std::lock_guard lock(requests_mutex_);
                 requests_.push_back(request);
@@ -65,6 +73,7 @@ private:
 
             beast::error_code shutdown_error;
             socket.shutdown(tcp::socket::shutdown_send, shutdown_error);
+            ++requests_served;
         }
     }
 
@@ -79,11 +88,20 @@ private:
 
 class EventEdgeServer {
 public:
-    explicit EventEdgeServer(std::vector<UpstreamEndpoint> upstreams, std::size_t worker_count = 1)
-        : server_(std::make_shared<HttpServer>(
+    explicit EventEdgeServer(std::vector<UpstreamEndpoint> upstreams,
+                             std::size_t worker_count = 1,
+                             HealthCheckOptions health_options = {},
+                             bool start_health_monitor = false)
+        : upstream_pool_(std::make_shared<UpstreamPool>(std::move(upstreams))),
+          server_(std::make_shared<HttpServer>(
               io_context_, tcp::endpoint{net::ip::address_v4::loopback(), 0},
-              std::make_shared<UpstreamPool>(std::move(upstreams)))) {
+              upstream_pool_)) {
         server_->run();
+        if (start_health_monitor) {
+            health_monitor_ = std::make_shared<UpstreamHealthMonitor>(
+                server_->executor(), upstream_pool_, health_options);
+            health_monitor_->start();
+        }
         for (std::size_t worker = 0; worker < worker_count; ++worker) {
             threads_.emplace_back([this] { io_context_.run(); });
         }
@@ -92,7 +110,10 @@ public:
     ~EventEdgeServer() {
         std::promise<void> stopped;
         const auto stopped_future = stopped.get_future();
-        net::post(server_->executor(), [server = server_, &stopped] {
+        net::post(server_->executor(), [server = server_, monitor = health_monitor_, &stopped] {
+            if (monitor) {
+                monitor->stop();
+            }
             server->stop();
             stopped.set_value();
         });
@@ -104,9 +125,15 @@ public:
         return server_->port();
     }
 
+    [[nodiscard]] std::shared_ptr<UpstreamPool> upstream_pool() const {
+        return upstream_pool_;
+    }
+
 private:
     net::io_context io_context_{1};
+    std::shared_ptr<UpstreamPool> upstream_pool_;
     std::shared_ptr<HttpServer> server_;
+    std::shared_ptr<UpstreamHealthMonitor> health_monitor_;
     std::vector<std::jthread> threads_;
 };
 
@@ -327,6 +354,22 @@ TEST(ReverseProxyIntegration, DeadBackendReturnsBadGatewayAndRotationContinues) 
     http::request<http::string_body> third_request{http::verb::get, "/third", 11};
     third_request.set(http::field::host, "client.example");
     EXPECT_EQ(send_request(eventedge.port(), third_request)["X-Test-Upstream"], "backend-b");
+}
+
+TEST(ReverseProxyIntegration, ReturnsServiceUnavailableWhenNoBackendIsHealthy) {
+    TestUpstream backend{0, "backend"};
+    EventEdgeServer eventedge{single_upstream(backend)};
+    static_cast<void>(eventedge.upstream_pool()->set_healthy(0, false));
+
+    http::request<http::string_body> proxied_request{http::verb::get, "/unavailable", 11};
+    proxied_request.set(http::field::host, "client.example");
+    const auto unavailable = send_request(eventedge.port(), proxied_request);
+    EXPECT_EQ(unavailable.result(), http::status::service_unavailable);
+    EXPECT_EQ(unavailable.body(), "Service Unavailable\n");
+
+    http::request<http::string_body> health_request{http::verb::get, "/health", 11};
+    health_request.set(http::field::host, "client.example");
+    EXPECT_EQ(send_request(eventedge.port(), health_request).result(), http::status::ok);
 }
 
 TEST(ReverseProxyIntegration, ReturnsBadGatewayWithoutAffectingLocalHealth) {

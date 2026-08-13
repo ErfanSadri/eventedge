@@ -1,4 +1,5 @@
 #include <eventedge/http_server.hpp>
+#include <eventedge/upstream_health_monitor.hpp>
 
 #include <boost/asio/bind_executor.hpp>
 #include <boost/asio/ip/address.hpp>
@@ -91,15 +92,19 @@ int main(int argc, char* argv[]) {
         }
 
         boost::asio::io_context io_context{1};
+        auto upstream_pool = std::make_shared<eventedge::UpstreamPool>(std::move(upstreams));
         auto server = std::make_shared<eventedge::HttpServer>(
-            io_context, eventedge::tcp::endpoint{address, port},
-            std::make_shared<eventedge::UpstreamPool>(std::move(upstreams)));
+            io_context, eventedge::tcp::endpoint{address, port}, upstream_pool);
         server->run();
+        auto health_monitor = std::make_shared<eventedge::UpstreamHealthMonitor>(
+            server->executor(), upstream_pool);
+        health_monitor->start();
 
         boost::asio::signal_set signals{io_context, SIGINT, SIGTERM};
-        signals.async_wait(boost::asio::bind_executor(server->executor(), [&io_context, server](
+        signals.async_wait(boost::asio::bind_executor(server->executor(), [&io_context, health_monitor, server](
                                const boost::system::error_code& error, int) {
             if (!error) {
+                health_monitor->stop();
                 server->stop();
                 io_context.stop();
             }

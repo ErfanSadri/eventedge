@@ -19,6 +19,6 @@ Client -> EventEdge -> healthy upstream backend
 
 EventEdge will not initially include a database, Redis, Kafka, Kubernetes integration, a frontend, TLS, or HTTP/2.
 
-## Current milestone: EVE-005
+## Current milestone: EVE-006
 
-The C++20 foundation now includes an asynchronous HTTP/1.1 server with a local `GET /health` response and round-robin reverse proxying across static configured upstreams. One `io_context` runs on configurable worker threads while per-session strands serialize connection state; a shared atomic selector advances backend selection. It opens a new upstream connection for each proxied request and returns `502 Bad Gateway` if the selected upstream cannot be reached. Health checks, unhealthy-backend avoidance, retries, caching, and metrics are not implemented.
+The C++20 foundation now includes an asynchronous HTTP/1.1 server with a local `GET /health` response and round-robin reverse proxying across static configured upstreams. One `io_context` runs on configurable worker threads while per-session strands serialize connection state. Periodic asynchronous TCP health checks update shared backend eligibility: unhealthy backends are skipped and recovered backends return automatically. With no healthy backend, application requests receive `503 Service Unavailable`; a selected backend that fails during proxying still yields `502 Bad Gateway`. Retries, passive health scoring, caching, and metrics are not implemented.

@@ -14,6 +14,7 @@ add_library(eventedge_core
     src/http_handler.cpp
     src/http_server.cpp
     src/http_session.cpp
+    src/upstream_health_monitor.cpp
     src/upstream_proxy.cpp
 )
 target_include_directories(eventedge_core PUBLIC include)
@@ -43,6 +44,7 @@ if(BUILD_TESTING)
         tests/http_handler_test.cpp
         tests/http_server_integration_test.cpp
         tests/upstream_pool_test.cpp
+        tests/upstream_health_monitor_test.cpp
         tests/reverse_proxy_integration_test.cpp
     )
     target_link_libraries(eventedge_tests PRIVATE eventedge_core GTest::gtest_main)

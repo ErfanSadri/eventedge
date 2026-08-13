@@ -51,4 +51,11 @@ HttpResponse make_bad_gateway_response(const HttpRequest& request) {
     return make_response(request, http::status::bad_gateway, "text/plain", "Bad Gateway\n");
 }
 
+HttpResponse make_service_unavailable_response(const HttpRequest& request) {
+    return make_response(request,
+                         http::status::service_unavailable,
+                         "text/plain",
+                         "Service Unavailable\n");
+}
+
 }  // namespace eventedge
