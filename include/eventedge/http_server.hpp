@@ -1,6 +1,7 @@
 #pragma once
 
 #include <eventedge/upstream_config.hpp>
+#include <eventedge/request_coalescer.hpp>
 #include <eventedge/response_cache.hpp>
 
 #include <boost/asio/ip/tcp.hpp>
@@ -19,7 +20,8 @@ public:
     HttpServer(net::io_context& io_context,
                tcp::endpoint endpoint,
                std::shared_ptr<UpstreamPool> upstream_pool,
-               std::shared_ptr<ResponseCache> response_cache);
+               std::shared_ptr<ResponseCache> response_cache,
+               std::shared_ptr<RequestCoalescer> request_coalescer);
 
     void run();
     void stop();
@@ -34,6 +36,7 @@ private:
     net::strand<net::io_context::executor_type> acceptor_strand_;
     std::shared_ptr<UpstreamPool> upstream_pool_;
     std::shared_ptr<ResponseCache> response_cache_;
+    std::shared_ptr<RequestCoalescer> request_coalescer_;
 };
 
 }  // namespace eventedge

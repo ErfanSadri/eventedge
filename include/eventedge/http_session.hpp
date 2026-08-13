@@ -1,6 +1,7 @@
 #pragma once
 
 #include <eventedge/http_handler.hpp>
+#include <eventedge/request_coalescer.hpp>
 #include <eventedge/upstream_config.hpp>
 #include <eventedge/response_cache.hpp>
 
@@ -19,7 +20,8 @@ class HttpSession : public std::enable_shared_from_this<HttpSession> {
 public:
     HttpSession(boost::asio::ip::tcp::socket&& socket,
                 std::shared_ptr<UpstreamPool> upstream_pool,
-                std::shared_ptr<ResponseCache> response_cache);
+                std::shared_ptr<ResponseCache> response_cache,
+                std::shared_ptr<RequestCoalescer> request_coalescer);
 
     void run();
 
@@ -28,6 +30,8 @@ private:
     void on_read(beast::error_code error, std::size_t bytes_transferred);
     void on_write(bool close, beast::error_code error, std::size_t bytes_transferred);
     void write_response(HttpResponse response);
+    void write_response_for_current_request(HttpResponse response);
+    void complete_flight(const std::string& key, HttpResponse response, bool should_cache);
     [[nodiscard]] bool cacheable_request() const;
     [[nodiscard]] bool cacheable_response(const HttpResponse& response) const;
     void close();
@@ -37,6 +41,7 @@ private:
     HttpRequest request_;
     std::shared_ptr<UpstreamPool> upstream_pool_;
     std::shared_ptr<ResponseCache> response_cache_;
+    std::weak_ptr<RequestCoalescer> request_coalescer_;
 };
 
 }  // namespace eventedge

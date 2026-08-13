@@ -22,11 +22,13 @@ void throw_if_error(const boost::system::error_code& error, const char* operatio
 HttpServer::HttpServer(net::io_context& io_context,
                        tcp::endpoint endpoint,
                        std::shared_ptr<UpstreamPool> upstream_pool,
-                       std::shared_ptr<ResponseCache> response_cache)
+                       std::shared_ptr<ResponseCache> response_cache,
+                       std::shared_ptr<RequestCoalescer> request_coalescer)
     : acceptor_(io_context),
       acceptor_strand_(net::make_strand(io_context)),
       upstream_pool_(std::move(upstream_pool)),
-      response_cache_(std::move(response_cache)) {
+      response_cache_(std::move(response_cache)),
+      request_coalescer_(std::move(request_coalescer)) {
     boost::system::error_code error;
 
     acceptor_.open(endpoint.protocol(), error);
@@ -65,7 +67,9 @@ void HttpServer::do_accept() {
         net::bind_executor(acceptor_strand_, [self = shared_from_this()](
                                                 boost::system::error_code error, tcp::socket socket) {
             if (!error) {
-                std::make_shared<HttpSession>(std::move(socket), self->upstream_pool_, self->response_cache_)->run();
+                std::make_shared<HttpSession>(
+                    std::move(socket), self->upstream_pool_, self->response_cache_, self->request_coalescer_)
+                    ->run();
             } else if (error != net::error::operation_aborted) {
                 std::cerr << "Accept error: " << error.message() << '\n';
             }
