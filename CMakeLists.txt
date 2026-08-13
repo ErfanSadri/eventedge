@@ -14,6 +14,7 @@ add_library(eventedge_core
     src/http_handler.cpp
     src/http_server.cpp
     src/http_session.cpp
+    src/request_coalescer.cpp
     src/response_cache.cpp
     src/upstream_health_monitor.cpp
     src/upstream_proxy.cpp
@@ -47,6 +48,7 @@ if(BUILD_TESTING)
         tests/upstream_pool_test.cpp
         tests/upstream_health_monitor_test.cpp
         tests/upstream_proxy_timeout_test.cpp
+        tests/request_coalescer_test.cpp
         tests/response_cache_test.cpp
         tests/reverse_proxy_integration_test.cpp
     )

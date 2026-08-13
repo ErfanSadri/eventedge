@@ -9,6 +9,8 @@
 
 #include <array>
 #include <barrier>
+#include <chrono>
+#include <condition_variable>
 #include <future>
 #include <mutex>
 #include <string>
@@ -86,6 +88,86 @@ private:
     std::jthread thread_;
 };
 
+class BlockingTestUpstream {
+public:
+    BlockingTestUpstream(std::size_t expected_requests, std::string identity)
+        : acceptor_(io_context_, tcp::endpoint{net::ip::address_v4::loopback(), 0}),
+          expected_requests_(expected_requests),
+          identity_(std::move(identity)),
+          thread_([this] { serve_requests(); }) {}
+
+    [[nodiscard]] std::uint16_t port() const {
+        return acceptor_.local_endpoint().port();
+    }
+
+    [[nodiscard]] bool wait_for_requests(std::size_t count) {
+        std::unique_lock lock(mutex_);
+        return request_arrived_.wait_for(lock, std::chrono::seconds(2), [this, count] {
+            return requests_.size() >= count;
+        });
+    }
+
+    void release_next_response() {
+        {
+            std::lock_guard lock(mutex_);
+            ++released_responses_;
+        }
+        response_released_.notify_one();
+    }
+
+    [[nodiscard]] std::size_t request_count() const {
+        std::lock_guard lock(mutex_);
+        return requests_.size();
+    }
+
+private:
+    void serve_requests() {
+        for (std::size_t served = 0; served < expected_requests_; ++served) {
+            tcp::socket socket{io_context_};
+            acceptor_.accept(socket);
+
+            beast::flat_buffer buffer;
+            HttpRequest request;
+            beast::error_code read_error;
+            http::read(socket, buffer, request, read_error);
+            if (read_error) {
+                continue;
+            }
+            {
+                std::lock_guard lock(mutex_);
+                requests_.push_back(request);
+            }
+            request_arrived_.notify_all();
+
+            std::unique_lock lock(mutex_);
+            response_released_.wait(lock, [this, served] { return released_responses_ > served; });
+            lock.unlock();
+
+            HttpResponse response{http::status::ok, request.version()};
+            response.set(http::field::content_type, "text/plain");
+            response.set("X-Test-Upstream", identity_);
+            response.keep_alive(false);
+            response.body() = identity_ + " response for " + std::string{request.target()};
+            response.prepare_payload();
+            http::write(socket, response);
+
+            beast::error_code shutdown_error;
+            socket.shutdown(tcp::socket::shutdown_send, shutdown_error);
+        }
+    }
+
+    net::io_context io_context_{1};
+    tcp::acceptor acceptor_;
+    std::size_t expected_requests_;
+    std::string identity_;
+    mutable std::mutex mutex_;
+    std::condition_variable request_arrived_;
+    std::condition_variable response_released_;
+    std::vector<HttpRequest> requests_;
+    std::size_t released_responses_{0};
+    std::jthread thread_;
+};
+
 class EventEdgeServer {
 public:
     explicit EventEdgeServer(std::vector<UpstreamEndpoint> upstreams,
@@ -93,9 +175,10 @@ public:
                              HealthCheckOptions health_options = {},
                              bool start_health_monitor = false)
         : upstream_pool_(std::make_shared<UpstreamPool>(std::move(upstreams))),
+          request_coalescer_(std::make_shared<RequestCoalescer>()),
           server_(std::make_shared<HttpServer>(
               io_context_, tcp::endpoint{net::ip::address_v4::loopback(), 0},
-              upstream_pool_, std::make_shared<ResponseCache>())) {
+              upstream_pool_, std::make_shared<ResponseCache>(), request_coalescer_)) {
         server_->run();
         if (start_health_monitor) {
             health_monitor_ = std::make_shared<UpstreamHealthMonitor>(
@@ -129,9 +212,14 @@ public:
         return upstream_pool_;
     }
 
+    [[nodiscard]] std::shared_ptr<RequestCoalescer> request_coalescer() const {
+        return request_coalescer_;
+    }
+
 private:
     net::io_context io_context_{1};
     std::shared_ptr<UpstreamPool> upstream_pool_;
+    std::shared_ptr<RequestCoalescer> request_coalescer_;
     std::shared_ptr<HttpServer> server_;
     std::shared_ptr<UpstreamHealthMonitor> health_monitor_;
     std::vector<std::jthread> threads_;
@@ -152,6 +240,19 @@ http::response<http::string_body> send_request(
     http::response<http::string_body> response;
     http::read(stream, buffer, response);
     return response;
+}
+
+bool wait_for_waiters(const std::shared_ptr<RequestCoalescer>& coalescer,
+                      const std::string& key,
+                      std::size_t expected_waiters) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (coalescer->waiter_count(key) == expected_waiters) {
+            return true;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    return coalescer->waiter_count(key) == expected_waiters;
 }
 
 TEST(ReverseProxyIntegration, ForwardsTargetRewritesHostAndRelaysResponse) {
@@ -254,6 +355,106 @@ TEST(ReverseProxyIntegration, ConcurrentClientsReceiveTheirOwnProxiedResponses) 
     }
 
     EXPECT_EQ(upstream.requests().size(), request_count);
+}
+
+TEST(ReverseProxyIntegration, CoalescesColdMissesAndCreatesNewFlightAfterTtl) {
+    constexpr std::size_t client_count = 32;
+    constexpr std::string_view target = "/live/game/42";
+    BlockingTestUpstream upstream{2, "upstream"};
+    EventEdgeServer eventedge{{{"127.0.0.1", upstream.port()}}, 4};
+
+    const auto run_burst = [&] {
+        std::barrier start_gate{static_cast<std::ptrdiff_t>(client_count + 1)};
+        std::vector<std::future<HttpResponse>> responses;
+        responses.reserve(client_count);
+        for (std::size_t client = 0; client < client_count; ++client) {
+            responses.push_back(std::async(std::launch::async, [&eventedge, &start_gate, target] {
+                start_gate.arrive_and_wait();
+                http::request<http::string_body> request{http::verb::get, target, 11};
+                request.set(http::field::host, "client.example");
+                return send_request(eventedge.port(), request);
+            }));
+        }
+        start_gate.arrive_and_wait();
+        return responses;
+    };
+
+    auto first_responses = run_burst();
+    EXPECT_TRUE(upstream.wait_for_requests(1));
+    EXPECT_TRUE(wait_for_waiters(eventedge.request_coalescer(), std::string{target}, client_count - 1));
+    EXPECT_EQ(upstream.request_count(), 1);
+    upstream.release_next_response();
+    for (auto& response : first_responses) {
+        EXPECT_EQ(response.get().body(), "upstream response for /live/game/42");
+    }
+
+    http::request<http::string_body> cached_request{http::verb::get, target, 11};
+    cached_request.set(http::field::host, "client.example");
+    EXPECT_EQ(send_request(eventedge.port(), cached_request).body(), "upstream response for /live/game/42");
+    EXPECT_EQ(upstream.request_count(), 1);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(2100));
+    auto second_responses = run_burst();
+    EXPECT_TRUE(upstream.wait_for_requests(2));
+    EXPECT_TRUE(wait_for_waiters(eventedge.request_coalescer(), std::string{target}, client_count - 1));
+    EXPECT_EQ(upstream.request_count(), 2);
+    upstream.release_next_response();
+    for (auto& response : second_responses) {
+        EXPECT_EQ(response.get().body(), "upstream response for /live/game/42");
+    }
+}
+
+TEST(ReverseProxyIntegration, CoalescedBurstConsumesOneRoundRobinSelection) {
+    constexpr std::size_t client_count = 32;
+    BlockingTestUpstream backend_a{1, "backend-a"};
+    TestUpstream backend_b{1, "backend-b"};
+    EventEdgeServer eventedge{{{"127.0.0.1", backend_a.port()}, {"127.0.0.1", backend_b.port()}}, 4};
+
+    std::barrier start_gate{static_cast<std::ptrdiff_t>(client_count + 1)};
+    std::vector<std::future<HttpResponse>> responses;
+    responses.reserve(client_count);
+    for (std::size_t client = 0; client < client_count; ++client) {
+        responses.push_back(std::async(std::launch::async, [&eventedge, &start_gate] {
+            start_gate.arrive_and_wait();
+            http::request<http::string_body> request{http::verb::get, "/same", 11};
+            request.set(http::field::host, "client.example");
+            return send_request(eventedge.port(), request);
+        }));
+    }
+    start_gate.arrive_and_wait();
+    EXPECT_TRUE(backend_a.wait_for_requests(1));
+    EXPECT_TRUE(wait_for_waiters(eventedge.request_coalescer(), "/same", client_count - 1));
+    EXPECT_EQ(backend_a.request_count(), 1);
+    backend_a.release_next_response();
+    for (auto& response : responses) {
+        EXPECT_EQ(response.get()["X-Test-Upstream"], "backend-a");
+    }
+
+    http::request<http::string_body> different_request{http::verb::get, "/different", 11};
+    different_request.set(http::field::host, "client.example");
+    EXPECT_EQ(send_request(eventedge.port(), different_request)["X-Test-Upstream"], "backend-b");
+    EXPECT_EQ(backend_b.requests().size(), 1);
+}
+
+TEST(ReverseProxyIntegration, PostAndAuthorizationRequestsBypassCoalescing) {
+    TestUpstream upstream{4};
+    EventEdgeServer eventedge{single_upstream(upstream), 4};
+
+    for (int request_number = 0; request_number < 2; ++request_number) {
+        http::request<http::string_body> post{http::verb::post, "/same", 11};
+        post.set(http::field::host, "client.example");
+        post.body() = "event";
+        post.prepare_payload();
+        EXPECT_EQ(send_request(eventedge.port(), post).result(), http::status::created);
+    }
+    for (int request_number = 0; request_number < 2; ++request_number) {
+        http::request<http::string_body> authorized{http::verb::get, "/same", 11};
+        authorized.set(http::field::host, "client.example");
+        authorized.set(http::field::authorization, "Bearer token");
+        EXPECT_EQ(send_request(eventedge.port(), authorized).result(), http::status::ok);
+    }
+
+    EXPECT_EQ(upstream.requests().size(), 4);
 }
 
 TEST(ReverseProxyIntegration, CyclesAcrossThreeUpstreamsWithoutHealthAdvancingSelection) {

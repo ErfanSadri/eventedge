@@ -31,7 +31,7 @@ TEST(HttpServerIntegration, ServesHealthEndpointOverTcp) {
     auto server = std::make_shared<HttpServer>(
         server_io, tcp::endpoint{net::ip::address_v4::loopback(), 0},
         std::make_shared<UpstreamPool>(std::vector<UpstreamEndpoint>{{"127.0.0.1", 9000}}),
-        std::make_shared<ResponseCache>());
+        std::make_shared<ResponseCache>(), std::make_shared<RequestCoalescer>());
     server->run();
 
     std::jthread server_thread([&server_io] { server_io.run(); });

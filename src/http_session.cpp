@@ -14,8 +14,12 @@ using tcp = net::ip::tcp;
 
 HttpSession::HttpSession(tcp::socket&& socket,
                          std::shared_ptr<UpstreamPool> upstream_pool,
-                         std::shared_ptr<ResponseCache> response_cache)
-    : stream_(std::move(socket)), upstream_pool_(std::move(upstream_pool)), response_cache_(std::move(response_cache)) {}
+                         std::shared_ptr<ResponseCache> response_cache,
+                         std::shared_ptr<RequestCoalescer> request_coalescer)
+    : stream_(std::move(socket)),
+      upstream_pool_(std::move(upstream_pool)),
+      response_cache_(std::move(response_cache)),
+      request_coalescer_(std::move(request_coalescer)) {}
 
 void HttpSession::run() {
     do_read();
@@ -52,10 +56,35 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
     const auto cache_key = std::string{request_.target()};
     if (cacheable_request()) {
         if (auto cached = response_cache_->get(cache_key)) {
-            cached->version(request_.version());
-            cached->keep_alive(request_.keep_alive());
-            return write_response(std::move(*cached));
+            return write_response_for_current_request(std::move(*cached));
         }
+
+        const auto request_coalescer = request_coalescer_.lock();
+        if (!request_coalescer) {
+            return write_response_for_current_request(make_service_unavailable_response(request_));
+        }
+        const auto role = request_coalescer->join_or_start(
+            cache_key, [self = shared_from_this(), executor = stream_.get_executor()](HttpResponse response) mutable {
+                net::post(executor, [self, response = std::move(response)]() mutable {
+                    self->write_response_for_current_request(std::move(response));
+                });
+            });
+        if (role == RequestCoalescer::Role::waiter) {
+            return;
+        }
+
+        const auto upstream = upstream_pool_->select();
+        if (!upstream) {
+            return complete_flight(cache_key, make_service_unavailable_response(request_), false);
+        }
+
+        std::make_shared<UpstreamProxy>(
+            stream_.get_executor(), *upstream, request_,
+            [self = shared_from_this(), cache_key](HttpResponse response) {
+                self->complete_flight(cache_key, std::move(response), true);
+            })
+            ->run();
+        return;
     }
 
     const auto upstream = upstream_pool_->select();
@@ -64,14 +93,20 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
     }
 
     std::make_shared<UpstreamProxy>(
-        stream_.get_executor(), *upstream, std::move(request_),
-        [self = shared_from_this(), cache_key, should_cache = cacheable_request()](HttpResponse response) {
-            if (should_cache && self->cacheable_response(response)) {
-                self->response_cache_->put(cache_key, response);
-            }
-            self->write_response(std::move(response));
+        stream_.get_executor(), *upstream, request_, [self = shared_from_this()](HttpResponse response) {
+            self->write_response_for_current_request(std::move(response));
         })
         ->run();
+}
+
+void HttpSession::complete_flight(const std::string& key, HttpResponse response, bool should_cache) {
+    if (should_cache && cacheable_response(response)) {
+        response_cache_->put(key, response);
+    }
+    if (const auto request_coalescer = request_coalescer_.lock()) {
+        request_coalescer->complete(key, response);
+    }
+    write_response_for_current_request(std::move(response));
 }
 
 bool HttpSession::cacheable_request() const {
@@ -97,6 +132,12 @@ void HttpSession::write_response(HttpResponse response) {
                           beast::error_code write_error, std::size_t bytes_transferred) {
                           self->on_write(close_after_write, write_error, bytes_transferred);
                       }));
+}
+
+void HttpSession::write_response_for_current_request(HttpResponse response) {
+    response.version(request_.version());
+    response.keep_alive(request_.keep_alive());
+    write_response(std::move(response));
 }
 
 void HttpSession::on_write(bool close_after_write, beast::error_code error, std::size_t) {
