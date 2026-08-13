@@ -62,12 +62,14 @@ std::string upstream_host_header(const UpstreamEndpoint& upstream) {
 UpstreamProxy::UpstreamProxy(boost::asio::any_io_executor executor,
                              UpstreamEndpoint upstream,
                              HttpRequest request,
-                             CompletionHandler completion_handler)
+                             CompletionHandler completion_handler,
+                             ProxyTimeouts timeouts)
     : resolver_(executor),
       stream_(executor),
       upstream_(std::move(upstream)),
       request_(std::move(request)),
       completion_handler_(std::move(completion_handler)),
+      timeouts_(timeouts),
       executor_(executor),
       client_version_(request_.version()),
       client_keep_alive_(request_.keep_alive()) {}
@@ -93,6 +95,7 @@ void UpstreamProxy::on_resolve(boost::beast::error_code error,
         return fail(error, "resolve");
     }
 
+    stream_.expires_after(timeouts_.connect);
     stream_.async_connect(results,
                           boost::asio::bind_executor(executor_, [self = shared_from_this()](boost::beast::error_code connect_error,
                                                       const boost::asio::ip::tcp::resolver::results_type::endpoint_type& endpoint) {
@@ -107,6 +110,7 @@ void UpstreamProxy::on_connect(
         return fail(error, "connect");
     }
 
+    stream_.expires_after(timeouts_.write);
     http::async_write(stream_, request_,
                       boost::asio::bind_executor(executor_, [self = shared_from_this()](boost::beast::error_code write_error,
                                                   std::size_t bytes_transferred) {
@@ -119,6 +123,7 @@ void UpstreamProxy::on_write(boost::beast::error_code error, std::size_t) {
         return fail(error, "write");
     }
 
+    stream_.expires_after(timeouts_.read);
     http::async_read(stream_, buffer_, response_,
                      boost::asio::bind_executor(executor_, [self = shared_from_this()](boost::beast::error_code read_error,
                                                  std::size_t bytes_transferred) {
@@ -142,11 +147,25 @@ void UpstreamProxy::on_read(boost::beast::error_code error, std::size_t) {
 }
 
 void UpstreamProxy::fail(const boost::beast::error_code& error, const char* operation) {
+    if (completed_) {
+        return;
+    }
     std::cerr << "Upstream " << operation << " error: " << error.message() << '\n';
-    complete(make_bad_gateway_response(request_));
+    if (error == boost::beast::error::timeout) {
+        complete(make_gateway_timeout_response(request_));
+    } else {
+        complete(make_bad_gateway_response(request_));
+    }
 }
 
 void UpstreamProxy::complete(HttpResponse response) {
+    if (completed_) {
+        return;
+    }
+    completed_ = true;
+    resolver_.cancel();
+    boost::beast::error_code close_error;
+    stream_.socket().close(close_error);
     if (completion_handler_) {
         auto completion_handler = std::move(completion_handler_);
         completion_handler(std::move(response));
