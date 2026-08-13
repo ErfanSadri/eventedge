@@ -1,5 +1,6 @@
 #include <eventedge/upstream_proxy.hpp>
 
+#include <boost/asio/bind_executor.hpp>
 #include <boost/beast/http.hpp>
 
 #include <iostream>
@@ -67,6 +68,7 @@ UpstreamProxy::UpstreamProxy(boost::asio::any_io_executor executor,
       upstream_(std::move(upstream)),
       request_(std::move(request)),
       completion_handler_(std::move(completion_handler)),
+      executor_(executor),
       client_version_(request_.version()),
       client_keep_alive_(request_.keep_alive()) {}
 
@@ -79,10 +81,10 @@ void UpstreamProxy::run() {
     request_.prepare_payload();
 
     resolver_.async_resolve(upstream_.host, upstream_.port,
-                            [self = shared_from_this()](boost::beast::error_code error,
+                            boost::asio::bind_executor(executor_, [self = shared_from_this()](boost::beast::error_code error,
                                                         boost::asio::ip::tcp::resolver::results_type results) {
                                 self->on_resolve(error, std::move(results));
-                            });
+                            }));
 }
 
 void UpstreamProxy::on_resolve(boost::beast::error_code error,
@@ -92,10 +94,10 @@ void UpstreamProxy::on_resolve(boost::beast::error_code error,
     }
 
     stream_.async_connect(results,
-                          [self = shared_from_this()](boost::beast::error_code connect_error,
+                          boost::asio::bind_executor(executor_, [self = shared_from_this()](boost::beast::error_code connect_error,
                                                       const boost::asio::ip::tcp::resolver::results_type::endpoint_type& endpoint) {
                               self->on_connect(connect_error, endpoint);
-                          });
+                          }));
 }
 
 void UpstreamProxy::on_connect(
@@ -106,10 +108,10 @@ void UpstreamProxy::on_connect(
     }
 
     http::async_write(stream_, request_,
-                      [self = shared_from_this()](boost::beast::error_code write_error,
+                      boost::asio::bind_executor(executor_, [self = shared_from_this()](boost::beast::error_code write_error,
                                                   std::size_t bytes_transferred) {
                           self->on_write(write_error, bytes_transferred);
-                      });
+                      }));
 }
 
 void UpstreamProxy::on_write(boost::beast::error_code error, std::size_t) {
@@ -118,10 +120,10 @@ void UpstreamProxy::on_write(boost::beast::error_code error, std::size_t) {
     }
 
     http::async_read(stream_, buffer_, response_,
-                     [self = shared_from_this()](boost::beast::error_code read_error,
+                     boost::asio::bind_executor(executor_, [self = shared_from_this()](boost::beast::error_code read_error,
                                                  std::size_t bytes_transferred) {
                          self->on_read(read_error, bytes_transferred);
-                     });
+                     }));
 }
 
 void UpstreamProxy::on_read(boost::beast::error_code error, std::size_t) {

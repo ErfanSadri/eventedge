@@ -40,6 +40,7 @@ private:
     HttpRequest request_;
     HttpResponse response_;
     CompletionHandler completion_handler_;
+    boost::asio::any_io_executor executor_;
     unsigned client_version_;
     bool client_keep_alive_;
 };

@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <barrier>
 #include <future>
 #include <mutex>
 #include <thread>
@@ -74,17 +75,19 @@ private:
 
 class EventEdgeServer {
 public:
-    explicit EventEdgeServer(UpstreamConfig upstream)
+    explicit EventEdgeServer(UpstreamConfig upstream, std::size_t worker_count = 1)
         : server_(std::make_shared<HttpServer>(
               io_context_, tcp::endpoint{net::ip::address_v4::loopback(), 0}, std::move(upstream))) {
         server_->run();
-        thread_ = std::jthread([this] { io_context_.run(); });
+        for (std::size_t worker = 0; worker < worker_count; ++worker) {
+            threads_.emplace_back([this] { io_context_.run(); });
+        }
     }
 
     ~EventEdgeServer() {
         std::promise<void> stopped;
         const auto stopped_future = stopped.get_future();
-        net::post(io_context_, [server = server_, &stopped] {
+        net::post(server_->executor(), [server = server_, &stopped] {
             server->stop();
             stopped.set_value();
         });
@@ -99,7 +102,7 @@ public:
 private:
     net::io_context io_context_{1};
     std::shared_ptr<HttpServer> server_;
-    std::jthread thread_;
+    std::vector<std::jthread> threads_;
 };
 
 http::response<http::string_body> send_request(
@@ -187,6 +190,34 @@ TEST(ReverseProxyIntegration, KeepsClientConnectionAliveAcrossProxiedRequests) {
     ASSERT_EQ(requests.size(), 2);
     EXPECT_EQ(requests[0].target(), "/first");
     EXPECT_EQ(requests[1].target(), "/second");
+}
+
+TEST(ReverseProxyIntegration, ConcurrentClientsReceiveTheirOwnProxiedResponses) {
+    constexpr std::size_t request_count = 32;
+    TestUpstream upstream{request_count};
+    EventEdgeServer eventedge{UpstreamConfig{"127.0.0.1", std::to_string(upstream.port())}, 4};
+
+    std::barrier start_gate{static_cast<std::ptrdiff_t>(request_count + 1)};
+    std::vector<std::future<HttpResponse>> responses;
+    responses.reserve(request_count);
+    for (std::size_t request_number = 0; request_number < request_count; ++request_number) {
+        responses.push_back(std::async(std::launch::async, [request_number, &eventedge, &start_gate] {
+            start_gate.arrive_and_wait();
+            http::request<http::string_body> request{
+                http::verb::get, "/concurrent/" + std::to_string(request_number), 11};
+            request.set(http::field::host, "client.example");
+            return send_request(eventedge.port(), request);
+        }));
+    }
+    start_gate.arrive_and_wait();
+
+    for (std::size_t request_number = 0; request_number < request_count; ++request_number) {
+        const auto response = responses[request_number].get();
+        EXPECT_EQ(response.result(), http::status::ok);
+        EXPECT_EQ(response.body(), "upstream response for /concurrent/" + std::to_string(request_number));
+    }
+
+    EXPECT_EQ(upstream.requests().size(), request_count);
 }
 
 TEST(ReverseProxyIntegration, ReturnsBadGatewayWithoutAffectingLocalHealth) {
