@@ -29,7 +29,8 @@ private:
 TEST(HttpServerIntegration, ServesHealthEndpointOverTcp) {
     net::io_context server_io{1};
     auto server = std::make_shared<HttpServer>(
-        server_io, tcp::endpoint{net::ip::address_v4::loopback(), 0});
+        server_io, tcp::endpoint{net::ip::address_v4::loopback(), 0},
+        UpstreamConfig{"127.0.0.1", "9000"});
     server->run();
 
     std::jthread server_thread([&server_io] { server_io.run(); });

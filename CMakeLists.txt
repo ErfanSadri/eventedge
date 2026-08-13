@@ -14,6 +14,7 @@ add_library(eventedge_core
     src/http_handler.cpp
     src/http_server.cpp
     src/http_session.cpp
+    src/upstream_proxy.cpp
 )
 target_include_directories(eventedge_core PUBLIC include)
 target_link_libraries(eventedge_core PUBLIC Boost::headers Threads::Threads)
@@ -41,6 +42,7 @@ if(BUILD_TESTING)
     add_executable(eventedge_tests
         tests/http_handler_test.cpp
         tests/http_server_integration_test.cpp
+        tests/reverse_proxy_integration_test.cpp
     )
     target_link_libraries(eventedge_tests PRIVATE eventedge_core GTest::gtest_main)
 

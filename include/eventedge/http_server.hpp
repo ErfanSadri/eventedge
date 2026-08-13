@@ -1,5 +1,7 @@
 #pragma once
 
+#include <eventedge/upstream_config.hpp>
+
 #include <boost/asio/ip/tcp.hpp>
 
 #include <cstdint>
@@ -12,7 +14,7 @@ using tcp = net::ip::tcp;
 
 class HttpServer : public std::enable_shared_from_this<HttpServer> {
 public:
-    HttpServer(net::io_context& io_context, const tcp::endpoint& endpoint);
+    HttpServer(net::io_context& io_context, tcp::endpoint endpoint, UpstreamConfig upstream);
 
     void run();
     void stop();
@@ -23,6 +25,7 @@ private:
     void do_accept();
 
     tcp::acceptor acceptor_;
+    UpstreamConfig upstream_;
 };
 
 }  // namespace eventedge

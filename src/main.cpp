@@ -9,6 +9,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace {
@@ -25,18 +26,24 @@ std::uint16_t parse_port(std::string_view value) {
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc != 1 && argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " [address port]\n";
+    if (argc != 1 && argc != 3 && argc != 5) {
+        std::cerr << "Usage: " << argv[0] << " [listen-address listen-port [upstream-host upstream-port]]\n";
         return 1;
     }
 
     try {
-        const auto address = boost::asio::ip::make_address(argc == 3 ? argv[1] : "127.0.0.1");
-        const auto port = argc == 3 ? parse_port(argv[2]) : std::uint16_t{8080};
+        const auto address = boost::asio::ip::make_address(argc >= 3 ? argv[1] : "127.0.0.1");
+        const auto port = argc >= 3 ? parse_port(argv[2]) : std::uint16_t{8080};
+        const std::string_view upstream_host = argc == 5 ? argv[3] : "127.0.0.1";
+        if (upstream_host.empty()) {
+            throw std::runtime_error("upstream host must not be empty");
+        }
+        const auto upstream_port = argc == 5 ? parse_port(argv[4]) : std::uint16_t{9000};
 
         boost::asio::io_context io_context{1};
         auto server = std::make_shared<eventedge::HttpServer>(
-            io_context, eventedge::tcp::endpoint{address, port});
+            io_context, eventedge::tcp::endpoint{address, port},
+            eventedge::UpstreamConfig{std::string{upstream_host}, std::to_string(upstream_port)});
         server->run();
 
         boost::asio::signal_set signals{io_context, SIGINT, SIGTERM};
@@ -47,7 +54,8 @@ int main(int argc, char* argv[]) {
             }
         });
 
-        std::cout << "EventEdge listening on " << address << ':' << port << '\n';
+        std::cout << "EventEdge listening on " << address << ':' << port
+                  << ", proxying to " << upstream_host << ':' << upstream_port << '\n';
         io_context.run();
     } catch (const std::exception& error) {
         std::cerr << "EventEdge failed to start: " << error.what() << '\n';

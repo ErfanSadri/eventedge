@@ -18,8 +18,8 @@ void throw_if_error(const boost::system::error_code& error, const char* operatio
 
 }  // namespace
 
-HttpServer::HttpServer(net::io_context& io_context, const tcp::endpoint& endpoint)
-    : acceptor_(io_context) {
+HttpServer::HttpServer(net::io_context& io_context, tcp::endpoint endpoint, UpstreamConfig upstream)
+    : acceptor_(io_context), upstream_(std::move(upstream)) {
     boost::system::error_code error;
 
     acceptor_.open(endpoint.protocol(), error);
@@ -52,7 +52,7 @@ void HttpServer::do_accept() {
     acceptor_.async_accept([self = shared_from_this()](boost::system::error_code error,
                                                         tcp::socket socket) {
         if (!error) {
-            std::make_shared<HttpSession>(std::move(socket))->run();
+            std::make_shared<HttpSession>(std::move(socket), self->upstream_)->run();
         } else if (error != net::error::operation_aborted) {
             std::cerr << "Accept error: " << error.message() << '\n';
         }
