@@ -20,6 +20,10 @@ HttpResponse make_response(const HttpRequest& request,
 
 }  // namespace
 
+bool is_health_request(const HttpRequest& request) {
+    return request.target() == "/health";
+}
+
 HttpResponse handle_request(const HttpRequest& request) {
     if (request.method() != http::verb::get) {
         auto response = make_response(request,
@@ -30,7 +34,7 @@ HttpResponse handle_request(const HttpRequest& request) {
         return response;
     }
 
-    if (request.target() == "/health") {
+    if (is_health_request(request)) {
         return make_response(request,
                              http::status::ok,
                              "application/json",
@@ -41,6 +45,10 @@ HttpResponse handle_request(const HttpRequest& request) {
                          http::status::not_found,
                          "text/plain",
                          "Not found\n");
+}
+
+HttpResponse make_bad_gateway_response(const HttpRequest& request) {
+    return make_response(request, http::status::bad_gateway, "text/plain", "Bad Gateway\n");
 }
 
 }  // namespace eventedge

@@ -22,10 +22,10 @@ TEST(HttpHandler, HealthEndpointReturnsExpectedJson) {
     EXPECT_TRUE(response.keep_alive());
 }
 
-TEST(HttpHandler, UnknownRouteReturnsNotFound) {
-    const auto response = handle_request(make_request(http::verb::get, "/not-found"));
+TEST(HttpHandler, NonGetHealthRequestReturnsMethodNotAllowed) {
+    const auto response = handle_request(make_request(http::verb::post, "/health"));
 
-    EXPECT_EQ(response.result(), http::status::not_found);
+    EXPECT_EQ(response.result(), http::status::method_not_allowed);
 }
 
 TEST(HttpHandler, UnsupportedMethodReturnsMethodNotAllowed) {
@@ -33,6 +33,11 @@ TEST(HttpHandler, UnsupportedMethodReturnsMethodNotAllowed) {
 
     EXPECT_EQ(response.result(), http::status::method_not_allowed);
     EXPECT_EQ(response[http::field::allow], "GET");
+}
+
+TEST(HttpHandler, IdentifiesOnlyHealthAsALocalRoute) {
+    EXPECT_TRUE(is_health_request(make_request(http::verb::get, "/health")));
+    EXPECT_FALSE(is_health_request(make_request(http::verb::get, "/live/game/42")));
 }
 
 TEST(HttpHandler, PreservesConnectionCloseRequest) {

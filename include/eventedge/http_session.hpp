@@ -1,6 +1,7 @@
 #pragma once
 
 #include <eventedge/http_handler.hpp>
+#include <eventedge/upstream_config.hpp>
 
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core.hpp>
@@ -15,7 +16,7 @@ namespace beast = boost::beast;
 
 class HttpSession : public std::enable_shared_from_this<HttpSession> {
 public:
-    explicit HttpSession(boost::asio::ip::tcp::socket&& socket);
+    HttpSession(boost::asio::ip::tcp::socket&& socket, UpstreamConfig upstream);
 
     void run();
 
@@ -23,11 +24,13 @@ private:
     void do_read();
     void on_read(beast::error_code error, std::size_t bytes_transferred);
     void on_write(bool close, beast::error_code error, std::size_t bytes_transferred);
+    void write_response(HttpResponse response);
     void close();
 
     beast::tcp_stream stream_;
     beast::flat_buffer buffer_;
     HttpRequest request_;
+    UpstreamConfig upstream_;
 };
 
 }  // namespace eventedge

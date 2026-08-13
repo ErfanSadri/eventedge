@@ -1,4 +1,5 @@
 #include <eventedge/http_session.hpp>
+#include <eventedge/upstream_proxy.hpp>
 
 #include <boost/beast/http.hpp>
 
@@ -10,7 +11,8 @@ namespace eventedge {
 namespace net = boost::asio;
 using tcp = net::ip::tcp;
 
-HttpSession::HttpSession(tcp::socket&& socket) : stream_(std::move(socket)) {}
+HttpSession::HttpSession(tcp::socket&& socket, UpstreamConfig upstream)
+    : stream_(std::move(socket)), upstream_(std::move(upstream)) {}
 
 void HttpSession::run() {
     do_read();
@@ -39,11 +41,22 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
         return;
     }
 
-    auto response = std::make_shared<HttpResponse>(handle_request(request_));
-    const bool close_after_write = response->need_eof();
+    if (is_health_request(request_)) {
+        return write_response(handle_request(request_));
+    }
 
-    http::async_write(stream_, *response,
-                      [self = shared_from_this(), response, close_after_write](
+    std::make_shared<UpstreamProxy>(
+        stream_.get_executor(), upstream_, std::move(request_),
+        [self = shared_from_this()](HttpResponse response) { self->write_response(std::move(response)); })
+        ->run();
+}
+
+void HttpSession::write_response(HttpResponse response) {
+    auto response_to_write = std::make_shared<HttpResponse>(std::move(response));
+    const bool close_after_write = response_to_write->need_eof();
+
+    http::async_write(stream_, *response_to_write,
+                      [self = shared_from_this(), response_to_write, close_after_write](
                           beast::error_code write_error, std::size_t bytes_transferred) {
                           self->on_write(close_after_write, write_error, bytes_transferred);
                       });
