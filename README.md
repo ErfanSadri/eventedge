@@ -6,7 +6,7 @@ EventEdge is a high-performance C++20 reverse proxy, load balancer, and cache de
 
 EventEdge uses asynchronous Boost.Asio/Beast networking with one `io_context` run by a configurable multithreaded runtime. Per-session strand serialization protects a local `GET /health` endpoint and reverse proxying across multiple static upstream backends with thread-safe round-robin selection. Active asynchronous TCP health checks exclude unhealthy backends and automatically return recovered backends to rotation.
 
-Request retry/failover, passive failure scoring, general proxy timeout policy, circuit breakers, connection pooling, caching, request coalescing, metrics, and measured performance claims are not implemented yet.
+Explicit proxy timeouts now bound upstream connect, write, and response-read stages. Request retry/failover, passive failure scoring, circuit breakers, connection pooling, caching, request coalescing, metrics, and measured performance claims are not implemented yet.
 
 ## Planned technical direction
 
@@ -31,7 +31,7 @@ The server defaults to listening on `127.0.0.1:8080`, proxying to one upstream a
 curl -i http://127.0.0.1:8080/health
 ```
 
-Backends begin provisionally healthy so EventEdge can serve traffic immediately. A periodic TCP resolve/connect probe (2-second interval, 1-second connect timeout) then updates eligibility. Each non-health request selects the next healthy upstream. If none are healthy, EventEdge returns `503 Service Unavailable`; if a selected healthy backend fails during proxying, it returns `502 Bad Gateway` with no retry. Each proxied request opens a new upstream HTTP connection. Connection pooling and streaming request/response bodies are intentionally deferred. The worker runtime has not been benchmarked; no performance improvement is claimed.
+Backends begin provisionally healthy so EventEdge can serve traffic immediately. A periodic TCP resolve/connect probe (2-second interval, 1-second connect timeout) then updates eligibility. Each non-health request selects the next healthy upstream. If none are healthy, EventEdge returns `503 Service Unavailable`. A selected backend that fails normally returns `502 Bad Gateway`; one that exceeds the proxy deadline returns `504 Gateway Timeout`. Default proxy budgets are 2 seconds for connect, 2 seconds for write, and 5 seconds for response read. No failed request is retried. Each proxied request opens a new upstream HTTP connection. Connection pooling and streaming request/response bodies are intentionally deferred. The worker runtime has not been benchmarked; no performance improvement is claimed.
 
 For an optimized build:
 

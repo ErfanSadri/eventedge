@@ -58,4 +58,8 @@ HttpResponse make_service_unavailable_response(const HttpRequest& request) {
                          "Service Unavailable\n");
 }
 
+HttpResponse make_gateway_timeout_response(const HttpRequest& request) {
+    return make_response(request, http::status::gateway_timeout, "text/plain", "Gateway Timeout\n");
+}
+
 }  // namespace eventedge

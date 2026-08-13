@@ -8,9 +8,16 @@
 #include <boost/beast/core/tcp_stream.hpp>
 
 #include <functional>
+#include <chrono>
 #include <memory>
 
 namespace eventedge {
+
+struct ProxyTimeouts {
+    std::chrono::milliseconds connect{std::chrono::seconds(2)};
+    std::chrono::milliseconds write{std::chrono::seconds(2)};
+    std::chrono::milliseconds read{std::chrono::seconds(5)};
+};
 
 class UpstreamProxy : public std::enable_shared_from_this<UpstreamProxy> {
 public:
@@ -19,7 +26,8 @@ public:
     UpstreamProxy(boost::asio::any_io_executor executor,
                   UpstreamEndpoint upstream,
                   HttpRequest request,
-                  CompletionHandler completion_handler);
+                  CompletionHandler completion_handler,
+                  ProxyTimeouts timeouts = {});
 
     void run();
 
@@ -40,9 +48,11 @@ private:
     HttpRequest request_;
     HttpResponse response_;
     CompletionHandler completion_handler_;
+    ProxyTimeouts timeouts_;
     boost::asio::any_io_executor executor_;
     unsigned client_version_;
     bool client_keep_alive_;
+    bool completed_{false};
 };
 
 }  // namespace eventedge

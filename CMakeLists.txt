@@ -45,6 +45,7 @@ if(BUILD_TESTING)
         tests/http_server_integration_test.cpp
         tests/upstream_pool_test.cpp
         tests/upstream_health_monitor_test.cpp
+        tests/upstream_proxy_timeout_test.cpp
         tests/reverse_proxy_integration_test.cpp
     )
     target_link_libraries(eventedge_tests PRIVATE eventedge_core GTest::gtest_main)
