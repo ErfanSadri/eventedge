@@ -15,11 +15,11 @@ using tcp = net::ip::tcp;
 HttpSession::HttpSession(tcp::socket&& socket,
                          std::shared_ptr<UpstreamPool> upstream_pool,
                          std::shared_ptr<ResponseCache> response_cache,
-                         std::shared_ptr<RequestCoalescer> request_coalescer)
+                         std::shared_ptr<RequestCoalescer> request_coalescer, std::shared_ptr<MetricsRegistry> metrics)
     : stream_(std::move(socket)),
       upstream_pool_(std::move(upstream_pool)),
       response_cache_(std::move(response_cache)),
-      request_coalescer_(std::move(request_coalescer)) {}
+      request_coalescer_(std::move(request_coalescer)), metrics_(std::move(metrics)) {}
 
 void HttpSession::run() {
     do_read();
@@ -48,16 +48,33 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
         }
         return;
     }
+    request_started_ = std::chrono::steady_clock::now();
+    metrics_->record_request();
 
     if (is_health_request(request_)) {
+        metrics_->record_health_request();
         return write_response(handle_request(request_));
+    }
+    if (request_.target() == "/metrics") {
+        metrics_->record_metrics_request();
+        if (request_.method() != http::verb::get) {
+            return write_response(handle_request(request_));
+        }
+        HttpResponse response{http::status::ok, request_.version()};
+        response.set(http::field::content_type, "text/plain; version=0.0.4");
+        response.keep_alive(request_.keep_alive());
+        response.body() = metrics_->render();
+        response.prepare_payload();
+        return write_response(std::move(response));
     }
 
     const auto cache_key = std::string{request_.target()};
     if (cacheable_request()) {
         if (auto cached = response_cache_->get(cache_key)) {
+            metrics_->record_cache_hit();
             return write_response_for_current_request(std::move(*cached));
         }
+        metrics_->record_cache_miss();
 
         const auto request_coalescer = request_coalescer_.lock();
         if (!request_coalescer) {
@@ -70,17 +87,24 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
                 });
             });
         if (role == RequestCoalescer::Role::waiter) {
+            metrics_->record_coalescing_waiter();
             return;
         }
+        metrics_->record_coalescing_leader();
 
         const auto upstream = upstream_pool_->select();
         if (!upstream) {
             return complete_flight(cache_key, make_service_unavailable_response(request_), false);
         }
 
+        metrics_->record_proxy_request();
+        metrics_->record_upstream_selection(upstream->host + ':' + std::to_string(upstream->port));
+        metrics_->proxy_started();
+
         std::make_shared<UpstreamProxy>(
             stream_.get_executor(), *upstream, request_,
             [self = shared_from_this(), cache_key](HttpResponse response) {
+                self->metrics_->proxy_completed();
                 self->complete_flight(cache_key, std::move(response), true);
             })
             ->run();
@@ -91,9 +115,13 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
     if (!upstream) {
         return write_response(make_service_unavailable_response(request_));
     }
+    metrics_->record_proxy_request();
+    metrics_->record_upstream_selection(upstream->host + ':' + std::to_string(upstream->port));
+    metrics_->proxy_started();
 
     std::make_shared<UpstreamProxy>(
         stream_.get_executor(), *upstream, request_, [self = shared_from_this()](HttpResponse response) {
+            self->metrics_->proxy_completed();
             self->write_response_for_current_request(std::move(response));
         })
         ->run();
@@ -124,6 +152,8 @@ bool HttpSession::cacheable_response(const HttpResponse& response) const {
 }
 
 void HttpSession::write_response(HttpResponse response) {
+    metrics_->record_response_status(static_cast<unsigned>(response.result_int()));
+    metrics_->observe_duration(std::chrono::steady_clock::now() - request_started_);
     auto response_to_write = std::make_shared<HttpResponse>(std::move(response));
     const bool close_after_write = response_to_write->need_eof();
 

@@ -19,11 +19,13 @@ public:
 
     HealthCheck(boost::asio::any_io_executor executor,
                 std::shared_ptr<UpstreamPool> upstream_pool,
+                std::shared_ptr<MetricsRegistry> metrics,
                 std::size_t index,
                 std::chrono::milliseconds timeout,
                 CompletionHandler completion_handler)
         : executor_(executor),
           upstream_pool_(std::move(upstream_pool)),
+          metrics_(std::move(metrics)),
           index_(index),
           timeout_(timeout),
           resolver_(executor),
@@ -74,6 +76,9 @@ private:
         stream_.socket().close(socket_error);
 
         if (upstream_pool_->set_healthy(index_, healthy)) {
+            if (metrics_) {
+                metrics_->record_health_transition();
+            }
             const auto endpoint = upstream_pool_->endpoint(index_);
             std::cerr << "Upstream " << endpoint.host << ':' << endpoint.port
                       << (healthy ? " recovered\n" : " became unhealthy\n");
@@ -85,6 +90,7 @@ private:
 
     boost::asio::any_io_executor executor_;
     std::shared_ptr<UpstreamPool> upstream_pool_;
+    std::shared_ptr<MetricsRegistry> metrics_;
     std::size_t index_;
     std::chrono::milliseconds timeout_;
     boost::asio::ip::tcp::resolver resolver_;
@@ -98,9 +104,10 @@ private:
 
 UpstreamHealthMonitor::UpstreamHealthMonitor(boost::asio::any_io_executor executor,
                                              std::shared_ptr<UpstreamPool> upstream_pool,
-                                             HealthCheckOptions options)
+                                             HealthCheckOptions options, std::shared_ptr<MetricsRegistry> metrics)
     : executor_(executor),
       upstream_pool_(std::move(upstream_pool)),
+      metrics_(std::move(metrics)),
       options_(options),
       timer_(executor) {}
 
@@ -132,7 +139,7 @@ void UpstreamHealthMonitor::run_checks() {
     }
     checks_remaining_ = upstream_pool_->size();
     for (std::size_t index = 0; index < checks_remaining_; ++index) {
-        std::make_shared<HealthCheck>(executor_, upstream_pool_, index, options_.timeout,
+        std::make_shared<HealthCheck>(executor_, upstream_pool_, metrics_, index, options_.timeout,
                                       [self = shared_from_this()] { self->on_check_complete(); })
             ->run();
     }
