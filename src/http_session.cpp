@@ -47,8 +47,13 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
         return write_response(handle_request(request_));
     }
 
+    const auto upstream = upstream_pool_->select();
+    if (!upstream) {
+        return write_response(make_service_unavailable_response(request_));
+    }
+
     std::make_shared<UpstreamProxy>(
-        stream_.get_executor(), upstream_pool_->select(), std::move(request_),
+        stream_.get_executor(), *upstream, std::move(request_),
         [self = shared_from_this()](HttpResponse response) { self->write_response(std::move(response)); })
         ->run();
 }

@@ -17,19 +17,19 @@ std::vector<UpstreamEndpoint> three_endpoints() {
 TEST(UpstreamPool, CyclesInRoundRobinOrder) {
     UpstreamPool pool{three_endpoints()};
 
-    EXPECT_EQ(pool.select().host, "backend-a");
-    EXPECT_EQ(pool.select().host, "backend-b");
-    EXPECT_EQ(pool.select().host, "backend-c");
-    EXPECT_EQ(pool.select().host, "backend-a");
-    EXPECT_EQ(pool.select().host, "backend-b");
-    EXPECT_EQ(pool.select().host, "backend-c");
+    EXPECT_EQ(pool.select()->host, "backend-a");
+    EXPECT_EQ(pool.select()->host, "backend-b");
+    EXPECT_EQ(pool.select()->host, "backend-c");
+    EXPECT_EQ(pool.select()->host, "backend-a");
+    EXPECT_EQ(pool.select()->host, "backend-b");
+    EXPECT_EQ(pool.select()->host, "backend-c");
 }
 
 TEST(UpstreamPool, SingleEndpointIsAlwaysSelected) {
     UpstreamPool pool{{{"backend-only", 9001}}};
 
     for (int selection = 0; selection < 10; ++selection) {
-        const auto endpoint = pool.select();
+        const auto endpoint = *pool.select();
         EXPECT_EQ(endpoint.host, "backend-only");
         EXPECT_EQ(endpoint.port, 9001);
     }
@@ -49,7 +49,7 @@ TEST(UpstreamPool, ConcurrentSelectionsRemainConsistent) {
     for (std::size_t thread = 0; thread < thread_count; ++thread) {
         threads.emplace_back([&pool, &counts] {
             for (std::size_t selection = 0; selection < selection_count / thread_count; ++selection) {
-                const auto endpoint = pool.select();
+                const auto endpoint = *pool.select();
                 if (endpoint.host == "backend-a") {
                     counts[0].fetch_add(1, std::memory_order_relaxed);
                 } else if (endpoint.host == "backend-b") {

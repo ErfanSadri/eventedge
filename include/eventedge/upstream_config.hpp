@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <cstdint>
+#include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -17,24 +19,61 @@ struct UpstreamEndpoint {
 class UpstreamPool {
 public:
     explicit UpstreamPool(std::vector<UpstreamEndpoint> endpoints)
-        : endpoints_(std::move(endpoints)) {
-        if (endpoints_.empty()) {
+        : backends_() {
+        if (endpoints.empty()) {
             throw std::invalid_argument("at least one upstream endpoint is required");
+        }
+        backends_.reserve(endpoints.size());
+        for (auto& endpoint : endpoints) {
+            backends_.push_back({std::move(endpoint), true});
         }
     }
 
-    [[nodiscard]] UpstreamEndpoint select() {
-        const auto index = next_index_.fetch_add(1, std::memory_order_relaxed);
-        return endpoints_[index % endpoints_.size()];
+    [[nodiscard]] std::optional<UpstreamEndpoint> select() {
+        std::lock_guard lock(mutex_);
+        for (std::size_t offset = 0; offset < backends_.size(); ++offset) {
+            const auto index = (next_index_ + offset) % backends_.size();
+            if (backends_[index].healthy) {
+                next_index_ = (index + 1) % backends_.size();
+                return backends_[index].endpoint;
+            }
+        }
+        return std::nullopt;
     }
 
     [[nodiscard]] std::size_t size() const {
-        return endpoints_.size();
+        return backends_.size();
+    }
+
+    [[nodiscard]] UpstreamEndpoint endpoint(std::size_t index) const {
+        std::lock_guard lock(mutex_);
+        return backends_.at(index).endpoint;
+    }
+
+    [[nodiscard]] bool is_healthy(std::size_t index) const {
+        std::lock_guard lock(mutex_);
+        return backends_.at(index).healthy;
+    }
+
+    [[nodiscard]] bool set_healthy(std::size_t index, bool healthy) {
+        std::lock_guard lock(mutex_);
+        auto& backend = backends_.at(index);
+        if (backend.healthy == healthy) {
+            return false;
+        }
+        backend.healthy = healthy;
+        return true;
     }
 
 private:
-    const std::vector<UpstreamEndpoint> endpoints_;
-    std::atomic<std::size_t> next_index_{0};
+    struct Backend {
+        UpstreamEndpoint endpoint;
+        bool healthy;
+    };
+
+    mutable std::mutex mutex_;
+    std::vector<Backend> backends_;
+    std::size_t next_index_{0};
 };
 
 }  // namespace eventedge
