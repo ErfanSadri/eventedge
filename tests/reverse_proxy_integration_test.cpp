@@ -95,7 +95,7 @@ public:
         : upstream_pool_(std::make_shared<UpstreamPool>(std::move(upstreams))),
           server_(std::make_shared<HttpServer>(
               io_context_, tcp::endpoint{net::ip::address_v4::loopback(), 0},
-              upstream_pool_)) {
+              upstream_pool_, std::make_shared<ResponseCache>())) {
         server_->run();
         if (start_health_monitor) {
             health_monitor_ = std::make_shared<UpstreamHealthMonitor>(

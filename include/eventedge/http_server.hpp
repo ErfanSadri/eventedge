@@ -1,6 +1,7 @@
 #pragma once
 
 #include <eventedge/upstream_config.hpp>
+#include <eventedge/response_cache.hpp>
 
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/strand.hpp>
@@ -17,7 +18,8 @@ class HttpServer : public std::enable_shared_from_this<HttpServer> {
 public:
     HttpServer(net::io_context& io_context,
                tcp::endpoint endpoint,
-               std::shared_ptr<UpstreamPool> upstream_pool);
+               std::shared_ptr<UpstreamPool> upstream_pool,
+               std::shared_ptr<ResponseCache> response_cache);
 
     void run();
     void stop();
@@ -31,6 +33,7 @@ private:
     tcp::acceptor acceptor_;
     net::strand<net::io_context::executor_type> acceptor_strand_;
     std::shared_ptr<UpstreamPool> upstream_pool_;
+    std::shared_ptr<ResponseCache> response_cache_;
 };
 
 }  // namespace eventedge
