@@ -19,6 +19,6 @@ Client -> EventEdge -> healthy upstream backend
 
 EventEdge will not initially include a database, Redis, Kafka, Kubernetes integration, a frontend, TLS, or HTTP/2.
 
-## Current milestone: EVE-010
+## Current milestone: EVE-011
 
-The C++20 foundation now includes an asynchronous HTTP/1.1 server with local `GET /health` and Prometheus-compatible `GET /metrics` responses, health-aware round-robin proxying, a shared LRU + TTL response cache, and process-local request coalescing. Metrics expose request, cache, coalescing, failure, upstream, health, in-flight, and duration observations. Retries, passive health scoring, distributed coordination, and external monitoring deployment are not implemented.
+The C++20 foundation includes asynchronous HTTP/1.1 proxying, local health and metrics routes, health-aware round-robin balancing, caching, and process-local coalescing. Separate ASan and TSan CMake presets support memory and concurrency validation. Retries, passive health scoring, distributed coordination, and external monitoring deployment are not implemented.

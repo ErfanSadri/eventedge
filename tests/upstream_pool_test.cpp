@@ -70,5 +70,34 @@ TEST(UpstreamPool, ConcurrentSelectionsRemainConsistent) {
     EXPECT_EQ(counts[2].load(), selection_count / 3);
 }
 
+TEST(UpstreamPool, SelectAndHealthUpdatesRemainSafeUnderContention) {
+    UpstreamPool pool{three_endpoints()};
+    std::atomic<bool> valid{true};
+    std::vector<std::thread> threads;
+    for (int worker = 0; worker < 6; ++worker) {
+        threads.emplace_back([&] {
+            for (int iteration = 0; iteration < 300; ++iteration) {
+                if (const auto endpoint = pool.select(); endpoint) {
+                    valid = valid && (endpoint->host == "backend-a" || endpoint->host == "backend-b" || endpoint->host == "backend-c");
+                }
+            }
+        });
+    }
+    for (int worker = 0; worker < 2; ++worker) {
+        threads.emplace_back([&] {
+            for (int iteration = 0; iteration < 300; ++iteration) {
+                static_cast<void>(pool.set_healthy(static_cast<std::size_t>(iteration % 3), iteration % 2 == 0));
+            }
+        });
+    }
+    for (auto& thread : threads) thread.join();
+    EXPECT_TRUE(valid);
+    for (std::size_t index = 0; index < 3; ++index) static_cast<void>(pool.set_healthy(index, false));
+    EXPECT_FALSE(pool.select());
+    static_cast<void>(pool.set_healthy(1, true));
+    ASSERT_TRUE(pool.select());
+    EXPECT_EQ(pool.select()->host, "backend-b");
+}
+
 }  // namespace
 }  // namespace eventedge

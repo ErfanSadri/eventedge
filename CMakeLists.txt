@@ -7,6 +7,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+option(EVENTEDGE_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+option(EVENTEDGE_ENABLE_TSAN "Enable ThreadSanitizer" OFF)
+
+if(EVENTEDGE_ENABLE_ASAN AND EVENTEDGE_ENABLE_TSAN)
+    message(FATAL_ERROR "EVENTEDGE_ENABLE_ASAN and EVENTEDGE_ENABLE_TSAN cannot be enabled together")
+endif()
+
 find_package(Boost 1.74 CONFIG REQUIRED)
 find_package(Threads REQUIRED)
 
@@ -25,6 +32,15 @@ target_link_libraries(eventedge_core PUBLIC Boost::headers Threads::Threads)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
     target_compile_options(eventedge_core PRIVATE -Wall -Wextra -Wpedantic)
+    if(EVENTEDGE_ENABLE_ASAN)
+        target_compile_options(eventedge_core PUBLIC -fsanitize=address -fno-omit-frame-pointer)
+        target_link_options(eventedge_core PUBLIC -fsanitize=address -fno-omit-frame-pointer)
+    elseif(EVENTEDGE_ENABLE_TSAN)
+        target_compile_options(eventedge_core PUBLIC -fsanitize=thread -fno-omit-frame-pointer)
+        target_link_options(eventedge_core PUBLIC -fsanitize=thread -fno-omit-frame-pointer)
+    endif()
+elseif(EVENTEDGE_ENABLE_ASAN OR EVENTEDGE_ENABLE_TSAN)
+    message(FATAL_ERROR "EventEdge sanitizers require a Clang or GCC-like compiler")
 endif()
 
 add_executable(eventedge src/main.cpp)
