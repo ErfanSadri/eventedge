@@ -17,7 +17,7 @@ public:
     using CompletionHandler = std::function<void(HttpResponse)>;
 
     UpstreamProxy(boost::asio::any_io_executor executor,
-                  UpstreamConfig upstream,
+                  UpstreamEndpoint upstream,
                   HttpRequest request,
                   CompletionHandler completion_handler);
 
@@ -36,7 +36,7 @@ private:
     boost::asio::ip::tcp::resolver resolver_;
     boost::beast::tcp_stream stream_;
     boost::beast::flat_buffer buffer_;
-    UpstreamConfig upstream_;
+    UpstreamEndpoint upstream_;
     HttpRequest request_;
     HttpResponse response_;
     CompletionHandler completion_handler_;

@@ -4,13 +4,13 @@ EventEdge is a high-performance C++20 reverse proxy, load balancer, and cache de
 
 ## Status
 
-EventEdge uses asynchronous Boost.Asio/Beast networking with one `io_context` run by a configurable multithreaded runtime. Per-session strand serialization protects a local `GET /health` endpoint and asynchronous reverse proxying to one configured HTTP upstream. Unavailable upstreams receive a basic `502 Bad Gateway` response.
+EventEdge uses asynchronous Boost.Asio/Beast networking with one `io_context` run by a configurable multithreaded runtime. Per-session strand serialization protects a local `GET /health` endpoint and reverse proxying across multiple static upstream backends with thread-safe round-robin selection. An unavailable selected upstream receives a basic `502 Bad Gateway` response.
 
-Multiple upstream backends, load balancing, active upstream health checks, retries, configurable timeout policy, caching, request coalescing, metrics, and measured performance claims are not implemented yet.
+Active health checks, unhealthy-backend avoidance, retries, connection pooling, advanced timeout policy, caching, request coalescing, metrics, and measured performance claims are not implemented yet.
 
 ## Planned technical direction
 
-Future milestones will add multiple upstream support, load balancing and health checks, cache-stampede protection, metrics, and Linux-focused validation.
+Future milestones will add health-aware balancing, cache-stampede protection, metrics, and Linux-focused validation.
 
 ## Build and test
 
@@ -23,14 +23,15 @@ ctest --preset debug --output-on-failure
 ./build/debug/eventedge
 ```
 
-The server defaults to listening on `127.0.0.1:8080` and proxying to `127.0.0.1:9000`. Its default worker count is `std::thread::hardware_concurrency()` with a minimum of one. Address, port, upstream host, upstream port, and an optional worker count can be supplied explicitly:
+The server defaults to listening on `127.0.0.1:8080`, proxying to one upstream at `127.0.0.1:9000`, and using `std::thread::hardware_concurrency()` workers (minimum one). To configure multiple upstreams, supply the listen address, listen port, worker count, and one or more `host:port` endpoints:
 
 ```sh
-./build/debug/eventedge 127.0.0.1 8080 127.0.0.1 9000 4
+./build/debug/eventedge 127.0.0.1 8080 4 \
+  127.0.0.1:9001 127.0.0.1:9002 127.0.0.1:9003
 curl -i http://127.0.0.1:8080/health
 ```
 
-Each proxied request opens a new upstream HTTP connection. Connection pooling and streaming request/response bodies are intentionally deferred. The worker runtime has not been benchmarked; no performance improvement is claimed.
+Each non-health request atomically selects the next configured upstream. A selected failed backend returns `502`; EventEdge does not skip it, retry, or mark it unhealthy. Each proxied request opens a new upstream HTTP connection. Connection pooling and streaming request/response bodies are intentionally deferred. The worker runtime has not been benchmarked; no performance improvement is claimed.
 
 For an optimized build:
 

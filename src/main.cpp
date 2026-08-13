@@ -40,29 +40,60 @@ unsigned int default_worker_count() {
     return std::max(1U, std::thread::hardware_concurrency());
 }
 
+eventedge::UpstreamEndpoint parse_upstream(std::string_view value) {
+    std::string_view host;
+    std::string_view port;
+
+    if (value.starts_with('[')) {
+        const auto closing_bracket = value.find(']');
+        if (closing_bracket == std::string_view::npos || closing_bracket + 1 >= value.size() ||
+            value[closing_bracket + 1] != ':') {
+            throw std::runtime_error("upstream must use host:port or [ipv6-address]:port");
+        }
+        host = value.substr(1, closing_bracket - 1);
+        port = value.substr(closing_bracket + 2);
+    } else {
+        const auto separator = value.rfind(':');
+        if (separator == std::string_view::npos || value.find(':') != separator) {
+            throw std::runtime_error("upstream must use host:port or [ipv6-address]:port");
+        }
+        host = value.substr(0, separator);
+        port = value.substr(separator + 1);
+    }
+
+    if (host.empty()) {
+        throw std::runtime_error("upstream host must not be empty");
+    }
+    return eventedge::UpstreamEndpoint{std::string{host}, parse_port(port)};
+}
+
 }  // namespace
 
 int main(int argc, char* argv[]) {
-    if (argc != 1 && argc != 3 && argc != 5 && argc != 6) {
+    if (argc != 1 && argc < 5) {
         std::cerr << "Usage: " << argv[0]
-                  << " [listen-address listen-port [upstream-host upstream-port [workers]]]\n";
+                  << " [listen-address listen-port workers upstream-host:port [upstream-host:port ...]]\n";
         return 1;
     }
 
     try {
-        const auto address = boost::asio::ip::make_address(argc >= 3 ? argv[1] : "127.0.0.1");
-        const auto port = argc >= 3 ? parse_port(argv[2]) : std::uint16_t{8080};
-        const std::string_view upstream_host = argc >= 5 ? argv[3] : "127.0.0.1";
-        if (upstream_host.empty()) {
-            throw std::runtime_error("upstream host must not be empty");
+        const auto address = boost::asio::ip::make_address(argc == 1 ? "127.0.0.1" : argv[1]);
+        const auto port = argc == 1 ? std::uint16_t{8080} : parse_port(argv[2]);
+        const auto worker_count = argc == 1 ? default_worker_count() : parse_worker_count(argv[3]);
+        std::vector<eventedge::UpstreamEndpoint> upstreams;
+        if (argc == 1) {
+            upstreams.push_back({"127.0.0.1", 9000});
+        } else {
+            upstreams.reserve(static_cast<std::size_t>(argc - 4));
+            for (int argument = 4; argument < argc; ++argument) {
+                upstreams.push_back(parse_upstream(argv[argument]));
+            }
         }
-        const auto upstream_port = argc >= 5 ? parse_port(argv[4]) : std::uint16_t{9000};
-        const auto worker_count = argc == 6 ? parse_worker_count(argv[5]) : default_worker_count();
 
         boost::asio::io_context io_context{1};
         auto server = std::make_shared<eventedge::HttpServer>(
             io_context, eventedge::tcp::endpoint{address, port},
-            eventedge::UpstreamConfig{std::string{upstream_host}, std::to_string(upstream_port)});
+            std::make_shared<eventedge::UpstreamPool>(std::move(upstreams)));
         server->run();
 
         boost::asio::signal_set signals{io_context, SIGINT, SIGTERM};
@@ -75,7 +106,7 @@ int main(int argc, char* argv[]) {
         }));
 
         std::cout << "EventEdge listening on " << address << ':' << port
-                  << ", proxying to " << upstream_host << ':' << upstream_port
+                  << ", proxying to " << (argc == 1 ? 1 : argc - 4) << " upstream(s)"
                   << " with " << worker_count << " worker(s)\n";
 
         std::vector<std::thread> workers;

@@ -16,7 +16,7 @@ namespace beast = boost::beast;
 
 class HttpSession : public std::enable_shared_from_this<HttpSession> {
 public:
-    HttpSession(boost::asio::ip::tcp::socket&& socket, UpstreamConfig upstream);
+    HttpSession(boost::asio::ip::tcp::socket&& socket, std::shared_ptr<UpstreamPool> upstream_pool);
 
     void run();
 
@@ -30,7 +30,7 @@ private:
     beast::tcp_stream stream_;
     beast::flat_buffer buffer_;
     HttpRequest request_;
-    UpstreamConfig upstream_;
+    std::shared_ptr<UpstreamPool> upstream_pool_;
 };
 
 }  // namespace eventedge
