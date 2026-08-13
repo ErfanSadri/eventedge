@@ -12,8 +12,10 @@ namespace eventedge {
 namespace net = boost::asio;
 using tcp = net::ip::tcp;
 
-HttpSession::HttpSession(tcp::socket&& socket, std::shared_ptr<UpstreamPool> upstream_pool)
-    : stream_(std::move(socket)), upstream_pool_(std::move(upstream_pool)) {}
+HttpSession::HttpSession(tcp::socket&& socket,
+                         std::shared_ptr<UpstreamPool> upstream_pool,
+                         std::shared_ptr<ResponseCache> response_cache)
+    : stream_(std::move(socket)), upstream_pool_(std::move(upstream_pool)), response_cache_(std::move(response_cache)) {}
 
 void HttpSession::run() {
     do_read();
@@ -47,6 +49,15 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
         return write_response(handle_request(request_));
     }
 
+    const auto cache_key = std::string{request_.target()};
+    if (cacheable_request()) {
+        if (auto cached = response_cache_->get(cache_key)) {
+            cached->version(request_.version());
+            cached->keep_alive(request_.keep_alive());
+            return write_response(std::move(*cached));
+        }
+    }
+
     const auto upstream = upstream_pool_->select();
     if (!upstream) {
         return write_response(make_service_unavailable_response(request_));
@@ -54,8 +65,27 @@ void HttpSession::on_read(beast::error_code error, std::size_t) {
 
     std::make_shared<UpstreamProxy>(
         stream_.get_executor(), *upstream, std::move(request_),
-        [self = shared_from_this()](HttpResponse response) { self->write_response(std::move(response)); })
+        [self = shared_from_this(), cache_key, should_cache = cacheable_request()](HttpResponse response) {
+            if (should_cache && self->cacheable_response(response)) {
+                self->response_cache_->put(cache_key, response);
+            }
+            self->write_response(std::move(response));
+        })
         ->run();
+}
+
+bool HttpSession::cacheable_request() const {
+    return request_.method() == http::verb::get && request_.find(http::field::authorization) == request_.end() &&
+           !is_health_request(request_);
+}
+
+bool HttpSession::cacheable_response(const HttpResponse& response) const {
+    if (response.result() != http::status::ok || response.find(http::field::set_cookie) != response.end()) {
+        return false;
+    }
+    const auto cache_control = response[http::field::cache_control];
+    return cache_control.find("no-store") == boost::beast::string_view::npos &&
+           cache_control.find("private") == boost::beast::string_view::npos;
 }
 
 void HttpSession::write_response(HttpResponse response) {
