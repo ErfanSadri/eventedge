@@ -1,6 +1,7 @@
 #pragma once
 
 #include <eventedge/http_handler.hpp>
+#include <eventedge/metrics.hpp>
 #include <eventedge/request_coalescer.hpp>
 #include <eventedge/upstream_config.hpp>
 #include <eventedge/response_cache.hpp>
@@ -10,6 +11,7 @@
 #include <boost/beast/core/tcp_stream.hpp>
 
 #include <cstddef>
+#include <chrono>
 #include <memory>
 
 namespace eventedge {
@@ -21,7 +23,7 @@ public:
     HttpSession(boost::asio::ip::tcp::socket&& socket,
                 std::shared_ptr<UpstreamPool> upstream_pool,
                 std::shared_ptr<ResponseCache> response_cache,
-                std::shared_ptr<RequestCoalescer> request_coalescer);
+                std::shared_ptr<RequestCoalescer> request_coalescer, std::shared_ptr<MetricsRegistry> metrics);
 
     void run();
 
@@ -42,6 +44,8 @@ private:
     std::shared_ptr<UpstreamPool> upstream_pool_;
     std::shared_ptr<ResponseCache> response_cache_;
     std::weak_ptr<RequestCoalescer> request_coalescer_;
+    std::shared_ptr<MetricsRegistry> metrics_;
+    std::chrono::steady_clock::time_point request_started_;
 };
 
 }  // namespace eventedge

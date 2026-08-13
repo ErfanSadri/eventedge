@@ -95,11 +95,12 @@ int main(int argc, char* argv[]) {
         auto upstream_pool = std::make_shared<eventedge::UpstreamPool>(std::move(upstreams));
         auto response_cache = std::make_shared<eventedge::ResponseCache>();
         auto request_coalescer = std::make_shared<eventedge::RequestCoalescer>();
+        auto metrics = std::make_shared<eventedge::MetricsRegistry>(upstream_pool);
         auto server = std::make_shared<eventedge::HttpServer>(
-            io_context, eventedge::tcp::endpoint{address, port}, upstream_pool, response_cache, request_coalescer);
+            io_context, eventedge::tcp::endpoint{address, port}, upstream_pool, response_cache, request_coalescer, metrics);
         server->run();
         auto health_monitor = std::make_shared<eventedge::UpstreamHealthMonitor>(
-            server->executor(), upstream_pool);
+            server->executor(), upstream_pool, eventedge::HealthCheckOptions{}, metrics);
         health_monitor->start();
 
         boost::asio::signal_set signals{io_context, SIGINT, SIGTERM};

@@ -23,12 +23,15 @@ HttpServer::HttpServer(net::io_context& io_context,
                        tcp::endpoint endpoint,
                        std::shared_ptr<UpstreamPool> upstream_pool,
                        std::shared_ptr<ResponseCache> response_cache,
-                       std::shared_ptr<RequestCoalescer> request_coalescer)
+                       std::shared_ptr<RequestCoalescer> request_coalescer, std::shared_ptr<MetricsRegistry> metrics)
     : acceptor_(io_context),
       acceptor_strand_(net::make_strand(io_context)),
       upstream_pool_(std::move(upstream_pool)),
       response_cache_(std::move(response_cache)),
-      request_coalescer_(std::move(request_coalescer)) {
+      request_coalescer_(std::move(request_coalescer)), metrics_(std::move(metrics)) {
+    if (!metrics_) {
+        metrics_ = std::make_shared<MetricsRegistry>(upstream_pool_);
+    }
     boost::system::error_code error;
 
     acceptor_.open(endpoint.protocol(), error);
@@ -67,8 +70,8 @@ void HttpServer::do_accept() {
         net::bind_executor(acceptor_strand_, [self = shared_from_this()](
                                                 boost::system::error_code error, tcp::socket socket) {
             if (!error) {
-                std::make_shared<HttpSession>(
-                    std::move(socket), self->upstream_pool_, self->response_cache_, self->request_coalescer_)
+                std::make_shared<HttpSession>(std::move(socket), self->upstream_pool_, self->response_cache_,
+                                              self->request_coalescer_, self->metrics_)
                     ->run();
             } else if (error != net::error::operation_aborted) {
                 std::cerr << "Accept error: " << error.message() << '\n';

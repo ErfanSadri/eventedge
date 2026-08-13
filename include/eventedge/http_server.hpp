@@ -2,6 +2,7 @@
 
 #include <eventedge/upstream_config.hpp>
 #include <eventedge/request_coalescer.hpp>
+#include <eventedge/metrics.hpp>
 #include <eventedge/response_cache.hpp>
 
 #include <boost/asio/ip/tcp.hpp>
@@ -21,7 +22,8 @@ public:
                tcp::endpoint endpoint,
                std::shared_ptr<UpstreamPool> upstream_pool,
                std::shared_ptr<ResponseCache> response_cache,
-               std::shared_ptr<RequestCoalescer> request_coalescer);
+               std::shared_ptr<RequestCoalescer> request_coalescer,
+               std::shared_ptr<MetricsRegistry> metrics = nullptr);
 
     void run();
     void stop();
@@ -37,6 +39,7 @@ private:
     std::shared_ptr<UpstreamPool> upstream_pool_;
     std::shared_ptr<ResponseCache> response_cache_;
     std::shared_ptr<RequestCoalescer> request_coalescer_;
+    std::shared_ptr<MetricsRegistry> metrics_;
 };
 
 }  // namespace eventedge

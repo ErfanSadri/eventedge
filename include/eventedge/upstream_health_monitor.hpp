@@ -1,6 +1,7 @@
 #pragma once
 
 #include <eventedge/upstream_config.hpp>
+#include <eventedge/metrics.hpp>
 
 #include <boost/asio/steady_timer.hpp>
 
@@ -18,7 +19,7 @@ class UpstreamHealthMonitor : public std::enable_shared_from_this<UpstreamHealth
 public:
     UpstreamHealthMonitor(boost::asio::any_io_executor executor,
                           std::shared_ptr<UpstreamPool> upstream_pool,
-                          HealthCheckOptions options = {});
+                          HealthCheckOptions options = {}, std::shared_ptr<MetricsRegistry> metrics = nullptr);
 
     void start();
     void stop();
@@ -30,6 +31,7 @@ private:
 
     boost::asio::any_io_executor executor_;
     std::shared_ptr<UpstreamPool> upstream_pool_;
+    std::shared_ptr<MetricsRegistry> metrics_;
     HealthCheckOptions options_;
     boost::asio::steady_timer timer_;
     std::size_t checks_remaining_{0};
