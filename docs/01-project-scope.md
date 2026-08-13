@@ -19,6 +19,6 @@ Client -> EventEdge -> healthy upstream backend
 
 EventEdge will not initially include a database, Redis, Kafka, Kubernetes integration, a frontend, TLS, or HTTP/2.
 
-## EVE-001 boundary
+## Current milestone: EVE-002
 
-This milestone establishes only the C++20 build, executable, tests, and project documentation. It contains no networking implementation.
+The C++20 foundation now includes a single-threaded asynchronous HTTP/1.1 server with a local `GET /health` response. It does not proxy to upstreams or implement load balancing, caching, upstream health checks, or metrics.

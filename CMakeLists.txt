@@ -7,12 +7,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-add_executable(eventedge src/main.cpp)
-target_include_directories(eventedge PRIVATE include)
+find_package(Boost 1.74 CONFIG REQUIRED)
+find_package(Threads REQUIRED)
+
+add_library(eventedge_core
+    src/http_handler.cpp
+    src/http_server.cpp
+    src/http_session.cpp
+)
+target_include_directories(eventedge_core PUBLIC include)
+target_link_libraries(eventedge_core PUBLIC Boost::headers Threads::Threads)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(eventedge PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(eventedge_core PRIVATE -Wall -Wextra -Wpedantic)
 endif()
+
+add_executable(eventedge src/main.cpp)
+target_link_libraries(eventedge PRIVATE eventedge_core)
 
 include(CTest)
 
@@ -27,8 +38,11 @@ if(BUILD_TESTING)
     )
     FetchContent_MakeAvailable(googletest)
 
-    add_executable(eventedge_tests tests/foundation_test.cpp)
-    target_link_libraries(eventedge_tests PRIVATE GTest::gtest_main)
+    add_executable(eventedge_tests
+        tests/http_handler_test.cpp
+        tests/http_server_integration_test.cpp
+    )
+    target_link_libraries(eventedge_tests PRIVATE eventedge_core GTest::gtest_main)
 
     include(GoogleTest)
     gtest_discover_tests(eventedge_tests)
