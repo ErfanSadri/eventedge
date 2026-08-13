@@ -43,3 +43,19 @@ For an optimized build:
 cmake --preset release
 cmake --build --preset release
 ```
+
+## Sanitizer validation
+
+Sanitizer builds are separate from Release builds:
+
+```sh
+cmake --preset asan
+cmake --build --preset asan
+ctest --preset asan --output-on-failure
+
+cmake --preset tsan
+cmake --build --preset tsan
+ctest --preset tsan --output-on-failure
+```
+
+TSan is significantly slower, and sanitizer runtime availability can vary by platform and compiler.

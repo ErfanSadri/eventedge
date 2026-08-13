@@ -93,5 +93,28 @@ TEST(RequestCoalescer, ConcurrentJoinsElectExactlyOneLeader) {
     EXPECT_EQ(coalescer.size(), 0);
 }
 
+TEST(RequestCoalescer, ReusesSameKeyAcrossContentionRounds) {
+    constexpr int rounds = 8;
+    constexpr int callers = 16;
+    RequestCoalescer coalescer;
+    for (int round = 0; round < rounds; ++round) {
+        std::barrier gate{callers};
+        std::atomic<int> leaders{0};
+        std::atomic<int> callbacks{0};
+        std::vector<std::jthread> threads;
+        for (int caller = 0; caller < callers; ++caller) {
+            threads.emplace_back([&] {
+                gate.arrive_and_wait();
+                if (coalescer.join_or_start("/reused", [&] (HttpResponse) { ++callbacks; }) == RequestCoalescer::Role::leader) ++leaders;
+            });
+        }
+        for (auto& thread : threads) thread.join();
+        EXPECT_EQ(leaders, 1);
+        coalescer.complete("/reused", response());
+        EXPECT_EQ(callbacks, callers - 1);
+        EXPECT_EQ(coalescer.size(), 0);
+    }
+}
+
 }  // namespace
 }  // namespace eventedge

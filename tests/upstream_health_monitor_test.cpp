@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <future>
 #include <functional>
 #include <thread>
 
@@ -76,6 +77,26 @@ TEST(UpstreamHealthMonitor, MarksLiveAndUnavailableEndpoints) {
     EXPECT_TRUE(wait_for([&] { return pool->is_healthy(0) && !pool->is_healthy(1); }));
     monitor->stop();
     io_context.stop();
+}
+
+TEST(UpstreamHealthMonitor, StopWithScheduledChecksAllowsBoundedShutdown) {
+    auto pool = std::make_shared<UpstreamPool>(std::vector<UpstreamEndpoint>{{"127.0.0.1", 9}});
+    boost::asio::io_context io_context{1};
+    auto monitor = std::make_shared<UpstreamHealthMonitor>(
+        io_context.get_executor(), pool, HealthCheckOptions{std::chrono::seconds(30), 200ms});
+    monitor->start();
+
+    std::promise<void> stopped;
+    const auto stopped_future = stopped.get_future();
+    std::thread worker([&] { io_context.run(); });
+    boost::asio::post(io_context, [&] {
+        monitor->stop();
+        monitor.reset();
+        io_context.stop();
+        stopped.set_value();
+    });
+    EXPECT_EQ(stopped_future.wait_for(1s), std::future_status::ready);
+    worker.join();
 }
 
 TEST(UpstreamPool, SkipsUnhealthyEndpointsAndAllowsRecovery) {
