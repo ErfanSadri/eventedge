@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Debug, Release, and shell checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential cmake git libboost-all-dev
+      - name: Configure Debug
+        run: cmake --preset debug
+      - name: Build Debug
+        run: cmake --build --preset debug
+      - name: Test Debug
+        run: ctest --preset debug --output-on-failure
+      - name: Configure Release
+        run: cmake --preset release
+      - name: Build Release
+        run: cmake --build --preset release
+      - name: Check scripts
+        run: |
+          bash -n scripts/eve012-demo.sh scripts/eve013-benchmark.sh
+          ./scripts/eve013-benchmark.sh --parser-self-check
+
+  asan:
+    name: AddressSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential cmake git libboost-all-dev
+      - name: Configure ASan
+        run: cmake --preset asan
+      - name: Build ASan
+        run: cmake --build --preset asan
+      - name: Test ASan
+        env:
+          ASAN_OPTIONS: detect_leaks=1
+        run: ctest --preset asan --output-on-failure
+
+  tsan:
+    name: ThreadSanitizer
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes build-essential cmake git libboost-all-dev
+      - name: Configure TSan
+        run: cmake --preset tsan
+      - name: Build TSan
+        run: cmake --build --preset tsan
+      - name: Test TSan
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --preset tsan --output-on-failure

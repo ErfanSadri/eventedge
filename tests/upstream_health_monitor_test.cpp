@@ -1,6 +1,7 @@
 #include <eventedge/upstream_health_monitor.hpp>
 
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/system/system_error.hpp>
 
 #include <gtest/gtest.h>
 
@@ -17,26 +18,36 @@ using namespace std::chrono_literals;
 class TcpBackend {
 public:
     TcpBackend()
-        : acceptor_(io_context_, boost::asio::ip::tcp::endpoint{
-              boost::asio::ip::address_v4::loopback(), 0}),
-          thread_([this] { accept_connections(); }) {}
-
-    ~TcpBackend() {
-        boost::system::error_code error;
-        acceptor_.close(error);
-    }
+        : acceptor_(make_acceptor(io_context_)),
+          thread_([this](std::stop_token stop_token) { accept_connections(stop_token); }) {}
 
     [[nodiscard]] std::uint16_t port() const {
         return acceptor_.local_endpoint().port();
     }
 
 private:
-    void accept_connections() {
-        while (acceptor_.is_open()) {
+    static boost::asio::ip::tcp::acceptor make_acceptor(boost::asio::io_context& io_context) {
+        boost::asio::ip::tcp::acceptor acceptor{
+            io_context, boost::asio::ip::tcp::endpoint{boost::asio::ip::address_v4::loopback(), 0}};
+        boost::system::error_code error;
+        acceptor.non_blocking(true, error);
+        if (error) {
+            throw boost::system::system_error{error};
+        }
+        return acceptor;
+    }
+
+    void accept_connections(std::stop_token stop_token) {
+        while (!stop_token.stop_requested()) {
             boost::asio::ip::tcp::socket socket{io_context_};
             boost::system::error_code error;
             acceptor_.accept(socket, error);
-            if (error) {
+            if (!error) {
+                continue;
+            }
+            if (error == boost::asio::error::would_block || error == boost::asio::error::try_again) {
+                std::this_thread::sleep_for(1ms);
+            } else {
                 break;
             }
         }

@@ -12,6 +12,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <future>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -334,19 +335,19 @@ TEST(ReverseProxyIntegration, ConcurrentClientsReceiveTheirOwnProxiedResponses) 
     TestUpstream upstream{request_count};
     EventEdgeServer eventedge{single_upstream(upstream), 4};
 
-    std::barrier start_gate{static_cast<std::ptrdiff_t>(request_count + 1)};
+    auto start_gate = std::make_shared<std::barrier<>>(static_cast<std::ptrdiff_t>(request_count + 1));
     std::vector<std::future<HttpResponse>> responses;
     responses.reserve(request_count);
     for (std::size_t request_number = 0; request_number < request_count; ++request_number) {
-        responses.push_back(std::async(std::launch::async, [request_number, &eventedge, &start_gate] {
-            start_gate.arrive_and_wait();
+        responses.push_back(std::async(std::launch::async, [request_number, &eventedge, start_gate] {
+            start_gate->arrive_and_wait();
             http::request<http::string_body> request{
                 http::verb::get, "/concurrent/" + std::to_string(request_number), 11};
             request.set(http::field::host, "client.example");
             return send_request(eventedge.port(), request);
         }));
     }
-    start_gate.arrive_and_wait();
+    start_gate->arrive_and_wait();
 
     for (std::size_t request_number = 0; request_number < request_count; ++request_number) {
         const auto response = responses[request_number].get();
@@ -364,18 +365,18 @@ TEST(ReverseProxyIntegration, CoalescesColdMissesAndCreatesNewFlightAfterTtl) {
     EventEdgeServer eventedge{{{"127.0.0.1", upstream.port()}}, 4};
 
     const auto run_burst = [&] {
-        std::barrier start_gate{static_cast<std::ptrdiff_t>(client_count + 1)};
+        auto start_gate = std::make_shared<std::barrier<>>(static_cast<std::ptrdiff_t>(client_count + 1));
         std::vector<std::future<HttpResponse>> responses;
         responses.reserve(client_count);
         for (std::size_t client = 0; client < client_count; ++client) {
-            responses.push_back(std::async(std::launch::async, [&eventedge, &start_gate, target] {
-                start_gate.arrive_and_wait();
+            responses.push_back(std::async(std::launch::async, [&eventedge, start_gate, target] {
+                start_gate->arrive_and_wait();
                 http::request<http::string_body> request{http::verb::get, target, 11};
                 request.set(http::field::host, "client.example");
                 return send_request(eventedge.port(), request);
             }));
         }
-        start_gate.arrive_and_wait();
+        start_gate->arrive_and_wait();
         return responses;
     };
 
@@ -410,18 +411,18 @@ TEST(ReverseProxyIntegration, CoalescedBurstConsumesOneRoundRobinSelection) {
     TestUpstream backend_b{1, "backend-b"};
     EventEdgeServer eventedge{{{"127.0.0.1", backend_a.port()}, {"127.0.0.1", backend_b.port()}}, 4};
 
-    std::barrier start_gate{static_cast<std::ptrdiff_t>(client_count + 1)};
+    auto start_gate = std::make_shared<std::barrier<>>(static_cast<std::ptrdiff_t>(client_count + 1));
     std::vector<std::future<HttpResponse>> responses;
     responses.reserve(client_count);
     for (std::size_t client = 0; client < client_count; ++client) {
-        responses.push_back(std::async(std::launch::async, [&eventedge, &start_gate] {
-            start_gate.arrive_and_wait();
+        responses.push_back(std::async(std::launch::async, [&eventedge, start_gate] {
+            start_gate->arrive_and_wait();
             http::request<http::string_body> request{http::verb::get, "/same", 11};
             request.set(http::field::host, "client.example");
             return send_request(eventedge.port(), request);
         }));
     }
-    start_gate.arrive_and_wait();
+    start_gate->arrive_and_wait();
     EXPECT_TRUE(backend_a.wait_for_requests(1));
     EXPECT_TRUE(wait_for_waiters(eventedge.request_coalescer(), "/same", client_count - 1));
     EXPECT_EQ(backend_a.request_count(), 1);
@@ -502,19 +503,19 @@ TEST(ReverseProxyIntegration, ConcurrentClientsAreDistributedAcrossMultipleUpstr
                                {"127.0.0.1", backend_c.port()}},
                               4};
 
-    std::barrier start_gate{static_cast<std::ptrdiff_t>(request_count + 1)};
+    auto start_gate = std::make_shared<std::barrier<>>(static_cast<std::ptrdiff_t>(request_count + 1));
     std::vector<std::future<HttpResponse>> responses;
     responses.reserve(request_count);
     for (std::size_t request_number = 0; request_number < request_count; ++request_number) {
-        responses.push_back(std::async(std::launch::async, [request_number, &eventedge, &start_gate] {
-            start_gate.arrive_and_wait();
+        responses.push_back(std::async(std::launch::async, [request_number, &eventedge, start_gate] {
+            start_gate->arrive_and_wait();
             http::request<http::string_body> request{
                 http::verb::get, "/multi/" + std::to_string(request_number), 11};
             request.set(http::field::host, "client.example");
             return send_request(eventedge.port(), request);
         }));
     }
-    start_gate.arrive_and_wait();
+    start_gate->arrive_and_wait();
 
     for (auto& response_future : responses) {
         const auto response = response_future.get();
