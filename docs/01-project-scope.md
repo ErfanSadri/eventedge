@@ -19,6 +19,6 @@ Client -> EventEdge -> healthy upstream backend
 
 EventEdge will not initially include a database, Redis, Kafka, Kubernetes integration, a frontend, TLS, or HTTP/2.
 
-## Current milestone: EVE-011
+## Current milestone: EVE-012
 
-The C++20 foundation includes asynchronous HTTP/1.1 proxying, local health and metrics routes, health-aware round-robin balancing, caching, and process-local coalescing. Separate ASan and TSan CMake presets support memory and concurrency validation. Retries, passive health scoring, distributed coordination, and external monitoring deployment are not implemented.
+The C++20 foundation includes asynchronous HTTP/1.1 proxying, local health and metrics routes, health-aware round-robin balancing, caching, and process-local coalescing. Docker Compose supplies three controllable upstream fixtures for failure/recovery simulation while EventEdge remains native. Retries, passive health scoring, distributed coordination, and external monitoring deployment are not implemented.

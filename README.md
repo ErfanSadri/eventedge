@@ -59,3 +59,15 @@ ctest --preset tsan --output-on-failure
 ```
 
 TSan is significantly slower, and sanitizer runtime availability can vary by platform and compiler.
+
+## Docker upstream failure demo
+
+Start the three disposable upstream fixtures (host ports 19001–19003):
+
+```sh
+docker compose up -d --build
+docker compose ps
+./build/debug/eventedge 127.0.0.1 8080 4 127.0.0.1:19001 127.0.0.1:19002 127.0.0.1:19003
+```
+
+The fixture exposes `/identity`, `/counted/<resource>`, `/counted-slow/<milliseconds>/<resource>`, `/slow/<milliseconds>`, and `/status/<code>`. Stop and restore a backend with `docker compose stop backend-b` / `docker compose start backend-b`; stopping all three demonstrates 503 after EventEdge health probes update. `/slow/6000` demonstrates the existing 504 deadline. Counted routes show cache hits and coalesced cold requests. Clean up with `docker compose down`.
