@@ -4,6 +4,7 @@
 #include <eventedge/metrics.hpp>
 
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 
 #include <chrono>
 #include <memory>
@@ -29,7 +30,7 @@ private:
     void run_checks();
     void on_check_complete();
 
-    boost::asio::any_io_executor executor_;
+    boost::asio::strand<boost::asio::any_io_executor> strand_;
     std::shared_ptr<UpstreamPool> upstream_pool_;
     std::shared_ptr<MetricsRegistry> metrics_;
     HealthCheckOptions options_;

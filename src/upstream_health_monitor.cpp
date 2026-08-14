@@ -1,6 +1,7 @@
 #include <eventedge/upstream_health_monitor.hpp>
 
 #include <boost/asio/bind_executor.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 
@@ -105,19 +106,23 @@ private:
 UpstreamHealthMonitor::UpstreamHealthMonitor(boost::asio::any_io_executor executor,
                                              std::shared_ptr<UpstreamPool> upstream_pool,
                                              HealthCheckOptions options, std::shared_ptr<MetricsRegistry> metrics)
-    : executor_(executor),
+    : strand_(boost::asio::make_strand(executor)),
       upstream_pool_(std::move(upstream_pool)),
       metrics_(std::move(metrics)),
       options_(options),
-      timer_(executor) {}
+      timer_(strand_) {}
 
 void UpstreamHealthMonitor::start() {
-    schedule_next_check(std::chrono::milliseconds::zero());
+    boost::asio::dispatch(strand_, [self = shared_from_this()] {
+        self->schedule_next_check(std::chrono::milliseconds::zero());
+    });
 }
 
 void UpstreamHealthMonitor::stop() {
-    stopped_ = true;
-    timer_.cancel();
+    boost::asio::dispatch(strand_, [self = shared_from_this()] {
+        self->stopped_ = true;
+        self->timer_.cancel();
+    });
 }
 
 void UpstreamHealthMonitor::schedule_next_check(std::chrono::milliseconds delay) {
@@ -125,7 +130,7 @@ void UpstreamHealthMonitor::schedule_next_check(std::chrono::milliseconds delay)
         return;
     }
     timer_.expires_after(delay);
-    timer_.async_wait(boost::asio::bind_executor(executor_, [self = shared_from_this()](
+    timer_.async_wait(boost::asio::bind_executor(strand_, [self = shared_from_this()](
                                                                boost::system::error_code error) {
         if (!error) {
             self->run_checks();
@@ -139,7 +144,7 @@ void UpstreamHealthMonitor::run_checks() {
     }
     checks_remaining_ = upstream_pool_->size();
     for (std::size_t index = 0; index < checks_remaining_; ++index) {
-        std::make_shared<HealthCheck>(executor_, upstream_pool_, metrics_, index, options_.timeout,
+        std::make_shared<HealthCheck>(strand_, upstream_pool_, metrics_, index, options_.timeout,
                                       [self = shared_from_this()] { self->on_check_complete(); })
             ->run();
     }

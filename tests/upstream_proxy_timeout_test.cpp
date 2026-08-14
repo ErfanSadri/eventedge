@@ -39,8 +39,8 @@ public:
 private:
     net::io_context io_context_{1};
     tcp::acceptor acceptor_;
-    std::jthread thread_;
     std::promise<void> request_arrived_;
+    std::jthread thread_;
 };
 
 TEST(UpstreamProxy, ReadTimeoutReturnsGatewayTimeoutExactlyOnce) {
