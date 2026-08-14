@@ -1,0 +1,19 @@
+services:
+  backend-a:
+    build: docker/upstream
+    environment:
+      BACKEND_ID: backend-a
+    ports:
+      - "127.0.0.1:19001:9000"
+  backend-b:
+    build: docker/upstream
+    environment:
+      BACKEND_ID: backend-b
+    ports:
+      - "127.0.0.1:19002:9000"
+  backend-c:
+    build: docker/upstream
+    environment:
+      BACKEND_ID: backend-c
+    ports:
+      - "127.0.0.1:19003:9000"
